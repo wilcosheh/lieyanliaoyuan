@@ -1,0 +1,4 @@
+project_id = "lieyanliaoyuan"
+
+[functions.mcp]
+verify_jwt = false

@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "dev": "deno run -A src/main.ts",
+    "test": "deno test -A",
+    "sim": "deno run -A scripts/sim_match.ts",
+    "check": "deno fmt --check && deno lint && deno test -A && deno run -A scripts/sim_match.ts",
+    "fmt": "deno fmt"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+    "pinyin-pro": "npm:pinyin-pro@3.26.0"
+  },
+  "lint": {
+    "exclude": ["supabase/.temp", "supabase/.branches"]
+  },
+  "fmt": {
+    "exclude": ["supabase/.temp", "supabase/.branches"]
+  }
+}
