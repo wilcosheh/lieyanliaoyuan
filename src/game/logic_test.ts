@@ -266,7 +266,7 @@ Deno.test("空等在平台取消前交还句号，准备仍然有效", () => {
 });
 
 Deno.test("房主挂着等待时，对手加入会立刻送回这次调用", () => {
-  let state = emptyRoom("5549", makePlayer("a", "甲", 1_000));
+  const state = emptyRoom("5549", makePlayer("a", "甲", 1_000));
   const parked = reduce(state, {
     type: "tool",
     deviceId: "a",

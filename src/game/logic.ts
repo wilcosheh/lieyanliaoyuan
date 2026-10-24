@@ -1024,7 +1024,7 @@ function startMatch(state: RoomState, now: number) {
 }
 
 function openingLine(
-  state: RoomState,
+  _state: RoomState,
   p: Player,
   _sfxBase: string,
   _now: number,
