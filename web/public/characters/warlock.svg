@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" role="img" aria-label="暗影术士">
+  <rect width="360" height="420" fill="#7152a1"/><path d="M0 0l360 270v150H0z" fill="#392c55" opacity=".6"/>
+  <path d="M115 116C124 27 241 25 252 121l-37-24-33-51-26 50z" fill="#242028"/><circle cx="182" cy="119" r="48" fill="#d6a987"/>
+  <path d="M78 231c31-91 177-91 207 0l35 189H42z" fill="#29232f"/><path d="M123 191l60 56 58-56 30 55-31 174H123L89 246z" fill="#60438f"/>
+  <path d="M49 92l20-16 183 292-21 13z" fill="#29232f"/><circle cx="61" cy="68" r="30" fill="#d55bb1" stroke="#29232f" stroke-width="9"/><circle cx="61" cy="68" r="10" fill="#f6d5ef"/>
+  <path d="M154 120h12m31 0h12" stroke="#29232f" stroke-width="6"/><path d="M169 146h27" stroke="#804d4f" stroke-width="5"/>
+</svg>

@@ -17,6 +17,17 @@ deno task dev
 链路：开房、准备、开战、火矢命中、下一拍播放对方原声、烈焰燎原被火矢打断、认输结算、拉取
 wav。
 
+Web 游戏本地启动：
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+页面默认位于 `http://localhost:3000`。未配置 Supabase 时使用单进程内存仓库；生产环境需配置
+`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`WEB_SESSION_SECRET` 和七牛语音环境变量。
+
 服务默认听 `8787`。灵矽里填写的 SSE 地址是：
 
 ```text
@@ -123,6 +134,11 @@ service role。
 - `src/battle/session.ts`：按 `battleId` 加载、串行执行并保存对局请求
 - `src/battle/repository.ts`：带版本号和 CAS 的对局仓库接口及内存实现
 - `src/battle/supabase_repository.ts`：跨进程共享的 Supabase/Postgres 仓库实现
+- `src/web/battle_application.ts`：Web 对局编排、权限校验、语音命令幂等和自动推进
+- `src/web/lobby/`：匹配、对局成员与语音命令仓库
+- `src/web/speech/`：七牛 ASR/TTS 适配接口
+- `web/`：Next.js Web BFF、游戏界面、录音与前端测试
+- `docs/web-architecture-design.md`：Next.js Web 接入层、游戏界面和七牛语音方案
 - `src/mcp/handler.ts`：MCP SSE 和工具调用
 - `src/mcp/store.ts`：单进程内存房，本地和 `sim` 用它
 - `src/mcp/supabase_store.ts`：同一套规则落到 Postgres
