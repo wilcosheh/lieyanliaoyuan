@@ -8,6 +8,7 @@ import {
   roomCodeFromArgs,
   type RoomState,
   type RpcId,
+  soloToolLine,
   speak,
   toolResult,
 } from "../game/logic.ts";
@@ -58,6 +59,14 @@ export class MemoryStore implements Store {
       if (input.name === "set_name") {
         const name = cleanName(String(input.args.name ?? ""));
         if (name) this.names.set(input.deviceId, name);
+      }
+      const solo = soloToolLine(input.name, input.args);
+      if (solo) {
+        this.push([{
+          deviceId: input.deviceId,
+          body: toolResult(input.rpcId, solo),
+        }]);
+        return;
       }
       if (input.name === "create_room") {
         await this.createRoom(input);

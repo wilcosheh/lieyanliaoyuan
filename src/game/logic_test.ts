@@ -8,9 +8,13 @@ import {
   matchUtterance,
   normalizeSyllables,
   type OutItem,
+  practiceCast,
+  practiceIntro,
+  practiceList,
   reduce,
   roomCodeFromArgs,
   type RoomState,
+  soloToolLine,
   SPELLS,
   spellSyllables,
 } from "./logic.ts";
@@ -99,6 +103,29 @@ Deno.test("加入房间认 room_id 里的四位号", () => {
   assertEquals(roomCodeFromArgs({ room_id: "5549" }), "5549");
   assertEquals(roomCodeFromArgs({ code: "房间5549。" }), "5549");
   assertEquals(roomCodeFromArgs({}), "");
+});
+
+Deno.test("咒语练习按发音报完美普通与效果层次", () => {
+  const intro = practiceIntro().text;
+  assert(intro.includes("进入咒语练习"));
+  assert(intro.includes("火矢"));
+  assert(intro.includes("完美"));
+  assertEquals(soloToolLine("start_practice")?.text, intro);
+
+  const perfect = practiceCast("火矢").text;
+  assert(perfect.includes("完美"));
+  assert(perfect.includes("4伤"));
+
+  const soft = practiceCast("寒霜止走").text;
+  assert(soft.includes("普通"));
+  assert(soft.includes("寒霜止步"));
+  assert(soft.includes("削弱") || soft.includes("约"));
+
+  assert(practiceCast("烈焰流云").text.includes("咒语没成"));
+  assert(practiceCast("火矢水幕").text.includes("一次一道"));
+  assert(practiceList().text.includes("可练咒语"));
+  assert(soloToolLine("end_practice")?.text.includes("练习结束"));
+  assertEquals(soloToolLine("cast", { utterance: "火矢" }), null);
 });
 
 Deno.test("拼音按无声调音节对齐咒语", () => {

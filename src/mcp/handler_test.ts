@@ -122,3 +122,30 @@ Deno.test("Streamable HTTP 的 create_room 直接返回房间号", async () => {
   const text = body.result.content?.[0]?.text ?? "";
   assert(/房间\d{4}/.test(text));
 });
+
+Deno.test("未进房也能练习咒语并回报评级", async () => {
+  const listed = await handle(post("tools/list", {}), ctx());
+  const listedBody = rpcBody(await listed.text());
+  const names = JSON.stringify(listedBody);
+  assert(names.includes("start_practice"));
+  assert(names.includes("practice"));
+
+  const start = await handle(
+    post("tools/call", { name: "start_practice", arguments: {} }, 2),
+    ctx(),
+  );
+  assertEquals(start.status, 200);
+  const startText = rpcBody(await start.text()).result.content?.[0]?.text ?? "";
+  assert(startText.includes("进入咒语练习"));
+
+  const shot = await handle(
+    post("tools/call", {
+      name: "practice",
+      arguments: { utterance: "火矢" },
+    }, 3),
+    ctx(),
+  );
+  const shotText = rpcBody(await shot.text()).result.content?.[0]?.text ?? "";
+  assert(shotText.includes("完美"));
+  assert(shotText.includes("火矢"));
+});

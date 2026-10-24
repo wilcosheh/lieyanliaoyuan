@@ -331,16 +331,114 @@ export type JsonResult = {
 export type OutItem = { deviceId: string; body: JsonResult };
 
 export const LOBBY_PROMPT =
-  "你是烈焰燎原的房间主持人。你必须先把工具返回的文本原样说出来，不补充、不解释、不加表情，不要说为您播放，不要说正在播放，说完才能调用下一个工具。不要询问房间名称。玩家报出名字就调用 set_name。玩家要开房间就立刻调用 create_room。玩家说出四位房间号就调用 join_room。玩家说准备就调用 ready。文本如果是三二一开战，要一口气原样念完。开战之后先把血量原样说出来，玩家接着说的每一句都调用 cast，utterance 是玩家原话。血量到0才分胜负，中间可以打很多回合。玩家说看血就调用 match_status。玩家说投降就调用 surrender。文本如果只有一个句号，不要出声，立刻再调用 wait_event。工具超时、被取消或失败，也不要出声，立刻再调用 wait_event。";
+  "你是烈焰燎原的房间主持人。你必须先把工具返回的文本原样说出来，不补充、不解释、不加表情，不要说为您播放，不要说正在播放，说完才能调用下一个工具。不要询问房间名称。玩家报出名字就调用 set_name。玩家说练习、学咒、练咒语或开始练习，就调用 start_practice。练习中玩家每说一句都调用 practice，utterance 是玩家原话，不要调用 cast。玩家说结束练习就调用 end_practice。玩家问有哪些咒语就调用 list_spells。玩家要开房间就立刻调用 create_room。玩家说出四位房间号就调用 join_room。玩家说准备就调用 ready。文本如果是三二一开战，要一口气原样念完。开战之后先把血量原样说出来，玩家接着说的每一句都调用 cast，utterance 是玩家原话。血量到0才分胜负，中间可以打很多回合。玩家说看血就调用 match_status。玩家说投降就调用 surrender。文本如果只有一个句号，不要出声，立刻再调用 wait_event。工具超时、被取消或失败，也不要出声，立刻再调用 wait_event。";
 
 export const BATTLE_PROMPT =
   "你是烈焰燎原的战场播报。你必须先把工具返回的文本原样说出来，比分和血量都要念，不要说为您播放，不要说正在播放，说完才能调用下一个工具。玩家每说完一句，立刻调用 cast，utterance 必须是玩家原话，一字不改。文本如果只有一个句号，不要出声，立刻再调用 wait_event。wait_event 超时、被取消或失败，马上再次调用。玩家说投降就调用 surrender。玩家说看血就调用 match_status。";
+
+export const PRACTICE_PROMPT =
+  "你是烈焰燎原的咒语教练。你必须先把工具返回的文本原样说出来，不补充、不加表情，不要说为您播放。玩家每念一句就调用 practice，utterance 是玩家原话。玩家问有哪些咒语就调用 list_spells。玩家说结束练习就调用 end_practice。练习时不要调用 cast、create_room、ready。";
 
 // 灵矽大约 26 秒会取消还没返回的工具调用。提前交还句号，让模型自己再挂上。
 export const HOLD_MS = 18_000;
 
 export const REVIEW_PROMPT =
   "对局已经结束。你把工具返回的文本原样说出来。玩家说复盘就调用 review_last_match。玩家要再来一局，就调用 create_room 或 join_room。不要调用 cast。";
+
+/** 不进房间也能调用的工具：咒语练习。 */
+export function soloToolLine(
+  name: string,
+  args: Record<string, unknown> = {},
+): Line | null {
+  switch (name) {
+    case "start_practice":
+      return practiceIntro();
+    case "end_practice":
+      return practiceEnd();
+    case "list_spells":
+      return practiceList();
+    case "practice":
+      return practiceCast(String(args.utterance ?? args.text ?? "").trim());
+    default:
+      return null;
+  }
+}
+
+export function practiceIntro(): Line {
+  const names = SPELLS.map((s) => s.name).join("、");
+  // 不挂 change_role：与台词同返回会被灵矽吞成「切换角色已处理」。
+  return speak(
+    `进入咒语练习。请逐张念：${names}。我会报完美、普通或没成，并说明效果层次。说结束练习可退出。`,
+  );
+}
+
+export function practiceEnd(): Line {
+  return speak("练习结束。可以说开房间、加入房间，或再说开始练习。");
+}
+
+export function practiceList(): Line {
+  const parts = SPELLS.map((s) => {
+    const kind = s.channelMs > 0 ? `吟唱${s.channelMs / 1000}秒` : "瞬发";
+    return `${s.name}，${s.mana}法力，${kind}。完美：${effectFull(s)}。普通：${
+      effectSoft(s)
+    }`;
+  });
+  return speak(`可练咒语。${parts.join("。")}。`);
+}
+
+export function practiceCast(utterance: string): Line {
+  if (!utterance) {
+    return speak("没听清。请再念一道咒语。");
+  }
+  const matched = matchUtterance(utterance);
+  if ("fail" in matched) {
+    if (matched.fail === "multi") {
+      return speak("一次一道。练习时一次只念一张卡的咒名。");
+    }
+    const names = SPELLS.map((s) => s.name).join("、");
+    return speak(`咒语没成。可再念${names}。`);
+  }
+  const { spell, grade } = matched;
+  if (grade === "perfect") {
+    return speak(
+      `完美。${spell.name}。完整效果：${effectFull(spell)}。还可再练。`,
+    );
+  }
+  return speak(
+    `普通。${spell.name}。削弱效果：${effectSoft(spell)}。再念准一点就是完美。`,
+  );
+}
+
+function effectFull(spell: Spell): string {
+  const bits: string[] = [];
+  if (spell.damage > 0) bits.push(`${spell.damage}伤`);
+  if (spell.silenceMs > 0) bits.push(`禁言${spell.silenceMs / 1000}秒`);
+  if (spell.shield > 0) {
+    bits.push(`${spell.shieldMs / 1000}秒内挡一次最多${spell.shield}`);
+  }
+  if (spell.channelMs > 0) bits.push(`需吟唱${spell.channelMs / 1000}秒`);
+  return bits.length ? bits.join("，") : "无直接伤害";
+}
+
+function effectSoft(spell: Spell): string {
+  const mul = gradeMul("standard");
+  const bits: string[] = [];
+  if (spell.damage > 0) {
+    bits.push(`约${Math.round(spell.damage * mul)}伤`);
+  }
+  if (spell.silenceMs > 0) {
+    bits.push(`禁言约${Math.round(spell.silenceMs * mul / 1000)}秒`);
+  }
+  if (spell.shield > 0) {
+    bits.push(
+      `${spell.shieldMs / 1000}秒内挡一次最多约${
+        Math.round(spell.shield * mul)
+      }`,
+    );
+  }
+  if (spell.channelMs > 0) bits.push(`仍需吟唱${spell.channelMs / 1000}秒`);
+  return bits.length ? bits.join("，") : "效果减弱";
+}
 
 export function toolResult(id: RpcId, line: Line, isError = false): JsonResult {
   const result: JsonResult = {

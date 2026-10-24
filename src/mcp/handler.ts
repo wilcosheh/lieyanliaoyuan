@@ -1,6 +1,7 @@
 import {
   BATTLE_PROMPT,
   LOBBY_PROMPT,
+  PRACTICE_PROMPT,
   REVIEW_PROMPT,
   type RpcId,
 } from "../game/logic.ts";
@@ -21,6 +22,30 @@ const TOOLS = [
     name: { type: "string" },
   }, ["name"]),
   tool(
+    "start_practice",
+    "进入咒语练习。玩家说练习、学咒、练咒语或开始练习时调用。返回后玩家每念一句就调用 practice，不要调用 cast。",
+    {},
+    [],
+  ),
+  tool(
+    "practice",
+    "练习念咒。utterance 必须是玩家原话。返回完美、普通或没成，以及对应效果层次，必须原样说出来。",
+    { utterance: { type: "string" } },
+    ["utterance"],
+  ),
+  tool(
+    "list_spells",
+    "列出可练习的咒语名称、费用和完美/普通效果，必须原样说出来。",
+    {},
+    [],
+  ),
+  tool(
+    "end_practice",
+    "结束咒语练习。玩家说结束练习、退出练习时调用。",
+    {},
+    [],
+  ),
+  tool(
     "create_room",
     "立刻开房，不要询问房间名称。返回四位房间号后，同一个回合里立刻调用 wait_event，直到听到对手来了。不要自己改写工具文本。",
     {},
@@ -40,7 +65,7 @@ const TOOLS = [
   ),
   tool(
     "cast",
-    "施放咒语。utterance 必须是玩家刚刚说的原话，一字不改。",
+    "对战中施放咒语。utterance 必须是玩家刚刚说的原话，一字不改。练习模式请用 practice，不要用 cast。",
     { utterance: { type: "string" }, audio_url: { type: "string" } },
     ["utterance"],
   ),
@@ -60,7 +85,12 @@ const TOOLS = [
   tool("review_last_match", "对局结束后复盘刚刚那一局。", {}, []),
 ];
 
-const INSTRUCTIONS = [LOBBY_PROMPT, BATTLE_PROMPT, REVIEW_PROMPT].join("\n");
+const INSTRUCTIONS = [
+  LOBBY_PROMPT,
+  PRACTICE_PROMPT,
+  BATTLE_PROMPT,
+  REVIEW_PROMPT,
+].join("\n");
 const origin = Date.now();
 
 export function createDefaultCtx(): ServerCtx {

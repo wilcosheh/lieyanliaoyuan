@@ -9,6 +9,7 @@ import {
   roomCodeFromArgs,
   type RoomState,
   type RpcId,
+  soloToolLine,
   speak,
   toolResult,
 } from "../game/logic.ts";
@@ -28,6 +29,11 @@ export class SupabaseStore implements Store {
     if (input.name === "set_name") {
       const name = cleanName(String(input.args.name ?? ""));
       if (name) await this.upsertName(input.deviceId, name);
+    }
+    const solo = soloToolLine(input.name, input.args);
+    if (solo) {
+      await this.deliver(input.deviceId, toolResult(input.rpcId, solo));
+      return;
     }
     if (input.name === "create_room") {
       await this.createRoom(input);
