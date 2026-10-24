@@ -9,6 +9,7 @@ import {
   normalizeSyllables,
   type OutItem,
   reduce,
+  roomCodeFromArgs,
   type RoomState,
   SPELLS,
   spellSyllables,
@@ -82,11 +83,23 @@ function start(table: Table) {
   assertEquals(parked, []);
   assertEquals(table.state.pending.a?.tool, "ready");
   const opened = table.tool("b", "ready");
+  assert(lineText(opened, "a").join("").includes("三"));
   assert(lineText(opened, "a").join("").includes("开战"));
   assert(lineText(opened, "b").join("").includes("开战"));
-  assert(lineFuncs(opened, "a").some((f) => f.name === "change_role"));
+  assert(lineText(opened, "a").join("").includes("30血"));
+  assertEquals(
+    lineFuncs(opened, "a").some((f) => f.name === "change_role"),
+    false,
+  );
+  assertEquals(table.state.queued.a, undefined);
   assertEquals(table.state.world.phase, "battle");
 }
+
+Deno.test("加入房间认 room_id 里的四位号", () => {
+  assertEquals(roomCodeFromArgs({ room_id: "5549" }), "5549");
+  assertEquals(roomCodeFromArgs({ code: "房间5549。" }), "5549");
+  assertEquals(roomCodeFromArgs({}), "");
+});
 
 Deno.test("拼音按无声调音节对齐咒语", () => {
   assertEquals(normalizeSyllables("火矢！"), ["huo", "shi"]);
@@ -130,7 +143,7 @@ Deno.test("开战、瞬发、水幕和禁言", () => {
   assert(lineText(shot, "a").join("").includes("火矢命中"));
   assertEquals(table.player("b").hp, HP - 4);
   const urls = lineFuncs(shot, "b").map((f) => f.arguments.audio_url);
-  assert(urls.some((url) => url?.endsWith("/sfx/huoshi.wav")));
+  assert(urls.every((url) => !url?.includes("/sfx/")));
   assert(urls.includes("https://raw/a.wav"));
 
   table.tool("a", "wait_event");
@@ -163,7 +176,7 @@ Deno.test("吟唱可被打断，临近结算则同时生效", () => {
 
   table.tool("a", "wait_event");
   const chant = table.tool("b", "cast", { utterance: "烈焰燎原" });
-  assert(lineText(chant, "a").join("").includes("对手吟唱烈焰燎原"));
+  assert(lineText(chant, "a").join("").includes("对手开始吟唱烈焰燎原"));
   const manaAfter = table.player("b").mana;
   table.now += 1_000;
   table.tool("b", "wait_event");
@@ -182,7 +195,7 @@ Deno.test("吟唱可被打断，临近结算则同时生效", () => {
   table.tool("b", "wait_event");
   const both = table.tool("a", "cast", { utterance: "火矢" });
   assert(table.player("b").channel);
-  assert(lineText(both, "b").join("").includes("对手火矢"));
+  assert(lineText(both, "b").join("").includes("中了火矢"));
   table.now = resolveAt;
   const boom = table.tool("a", "wait_event");
   assertEquals(table.state.world.phase, "battle");
@@ -231,16 +244,178 @@ Deno.test("血量归零立刻分出胜负", () => {
   assertEquals(table.state.world.winner, "a");
   assert(lineText(fin, "a").join("").includes("你赢了"));
   assert(lineText(fin, "b").join("").includes("你输了"));
-  assert(
-    lineFuncs(fin, "a").some((f) =>
-      f.arguments.audio_url?.endsWith("/sfx/sheng.wav")
-    ),
+  assert(lineFuncs(fin, "a").every((f) => f.name !== "linx_play"));
+  assert(lineFuncs(fin, "b").every((f) => f.name !== "linx_play"));
+});
+
+Deno.test("空等在平台取消前交还句号，准备仍然有效", () => {
+  const table = new Table();
+  const notice = table.tool("a", "wait_event");
+  assert(lineText(notice, "a").join("").includes("对手来了"));
+  assertEquals(table.tool("a", "ready"), []);
+  table.now += 17_000;
+  assertEquals(table.tick(), []);
+  assertEquals(table.state.pending.a?.tool, "ready");
+  table.now += 1_000;
+  const beat = table.tick();
+  assertEquals(lineText(beat, "a"), ["。"]);
+  assertEquals(table.state.pending.a, undefined);
+  assertEquals(table.player("a").ready, true);
+  assertEquals(table.tool("a", "wait_event"), []);
+  assertEquals(table.state.pending.a?.tool, "wait_event");
+});
+
+Deno.test("房主挂着等待时，对手加入会立刻送回这次调用", () => {
+  let state = emptyRoom("5549", makePlayer("a", "甲", 1_000));
+  const parked = reduce(state, {
+    type: "tool",
+    deviceId: "a",
+    agentId: "agent",
+    sessionId: "sess-a",
+    rpcId: 1,
+    name: "wait_event",
+    args: {},
+    audioEnabled: false,
+    sfxBase: SFX,
+    now: 1_000,
+  });
+  assertEquals(parked.outbox, []);
+  assertEquals(parked.state.pending.a?.tool, "wait_event");
+  const joined = reduce(parked.state, {
+    type: "tool",
+    deviceId: "b",
+    agentId: "agent",
+    sessionId: "sess-b",
+    rpcId: 2,
+    name: "join_room",
+    args: { name: "乙", code: "5549" },
+    audioEnabled: false,
+    sfxBase: SFX,
+    now: 2_000,
+  });
+  assert(lineText(joined.outbox, "a").join("").includes("对手来了"));
+  assert(lineText(joined.outbox, "b").join("").includes("准备开战"));
+  assertEquals(joined.state.pending.a, undefined);
+});
+
+Deno.test("房主挂着准备时，对手加入也会立刻送回这次调用", () => {
+  const state = emptyRoom("5549", makePlayer("a", "甲", 1_000));
+  const parked = reduce(state, {
+    type: "tool",
+    deviceId: "a",
+    agentId: "agent",
+    sessionId: "sess-a",
+    rpcId: 1,
+    name: "ready",
+    args: {},
+    audioEnabled: false,
+    sfxBase: SFX,
+    now: 1_000,
+  });
+  assertEquals(parked.outbox, []);
+  assertEquals(parked.state.pending.a?.tool, "ready");
+  const joined = reduce(parked.state, {
+    type: "tool",
+    deviceId: "b",
+    agentId: "agent",
+    sessionId: "sess-b",
+    rpcId: 2,
+    name: "join_room",
+    args: { name: "乙", room_id: "5549" },
+    audioEnabled: false,
+    sfxBase: SFX,
+    now: 2_000,
+  });
+  assert(lineText(joined.outbox, "a").join("").includes("对手来了"));
+  assertEquals(
+    joined.state.world.players.find((p) => p.deviceId === "a")?.ready,
+    true,
   );
+  assertEquals(joined.state.pending.a, undefined);
+});
+
+function park(table: Table, id: string) {
+  for (let i = 0; i < 4 && !table.state.pending[id]; i++) {
+    table.tool(id, "wait_event");
+  }
+  if (!table.state.pending[id]) throw new Error(`${id} 没有挂起`);
+}
+
+Deno.test("两段吟唱各算各的，战报一句一句分开", () => {
+  const table = new Table();
+  start(table);
+  table.now += 10_000;
+  park(table, "a");
+  park(table, "b");
+  table.tool("a", "cast", { utterance: "烈焰燎原" });
+  table.now += 1_000;
+  table.tool("b", "cast", { utterance: "寒霜止步" });
+  assert(table.player("a").channel, "烈焰燎原不该被寒霜止步打断");
+  assert(table.player("b").channel);
+  const frostAt = table.player("b").channel?.resolveAt ?? 0;
+  park(table, "a");
+  park(table, "b");
+  table.now = frostAt;
+  const frost = table.tick();
+  assert(lineText(frost, "a").join("").includes("寒霜止步"));
+  assert(lineText(frost, "b").join("").includes("寒霜止步"));
+  assert(!lineText(frost, "a").join("").includes("烈焰燎原"));
+  assert(lineFuncs(frost, "a").every((f) => f.name !== "linx_play"));
+  assert(table.player("a").channel);
+  const fireAt = table.player("a").channel?.resolveAt ?? 0;
+  park(table, "a");
+  park(table, "b");
+  table.now = fireAt;
+  const fire = table.tick();
+  assert(lineText(fire, "a").join("").includes("烈焰燎原"));
+  assert(lineText(fire, "b").join("").includes("烈焰燎原"));
+  assert(lineFuncs(fire, "a").every((f) => f.name !== "linx_play"));
+  assert(lineFuncs(fire, "b").every((f) => f.name !== "linx_play"));
+});
+
+Deno.test("同一轮里两段咒语战报分开交还", () => {
+  const table = new Table();
+  start(table);
+  table.now += 10_000;
+  table.tool("a", "cast", { utterance: "烈焰燎原" });
+  table.now += 1_000;
+  table.tool("b", "cast", { utterance: "寒霜止步" });
+  const frostAt = table.player("b").channel?.resolveAt ?? 0;
+  const fireAt = table.player("a").channel?.resolveAt ?? 0;
+  park(table, "a");
+  park(table, "b");
+  table.now = Math.max(frostAt, fireAt);
+  const first = table.tick();
+  const firstText = lineText(first, "a").join("");
+  assert(lineFuncs(first, "a").every((f) => f.name !== "linx_play"));
+  const second = table.tool("a", "wait_event");
+  const secondText = lineText(second, "a").join("");
+  const both = `${firstText}${secondText}`;
+  assert(both.includes("烈焰燎原"));
+  assert(both.includes("寒霜止步"));
   assert(
-    lineFuncs(fin, "b").some((f) =>
-      f.arguments.audio_url?.endsWith("/sfx/bai.wav")
-    ),
+    (firstText.includes("烈焰燎原") ? 1 : 0) +
+        (firstText.includes("寒霜止步") ? 1 : 0) === 1,
   );
+  assert(lineFuncs(second, "a").every((f) => f.name !== "linx_play"));
+});
+
+Deno.test("对战中的空等会报血量、领先和剩余时间", () => {
+  const table = new Table();
+  start(table);
+  assertEquals(table.tool("a", "wait_event"), []);
+  assertEquals(table.tool("b", "wait_event"), []);
+  table.now += 17_000;
+  assertEquals(table.tick(), []);
+  table.now += 1_000;
+  const beat = table.tick();
+  const text = lineText(beat, "a").join("");
+  assert(text.includes("对战中"));
+  assert(text.includes("血量持平"));
+  assert(text.includes("你30血"));
+  assert(text.includes("对手30血"));
+  assert(text.includes("血量到0"));
+  assert(text.includes("火矢"));
 });
 
 Deno.test("取消等待后，战报留到下一次 wait_event", () => {
@@ -259,7 +434,7 @@ Deno.test("取消等待后，战报留到下一次 wait_event", () => {
   assertEquals(lineText(shot, "b"), []);
   const later = table.tool("b", "wait_event");
   assert(
-    lineText(later, "b").join("").includes("对手火矢"),
+    lineText(later, "b").join("").includes("中了火矢"),
     JSON.stringify(lineText(later)) + " queued=" +
       JSON.stringify(table.state.queued),
   );

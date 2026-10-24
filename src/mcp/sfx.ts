@@ -57,6 +57,13 @@ function render(name: SfxName): Float32Array {
         0.5,
         (t) => Math.sin(2 * Math.PI * (440 - t * 280) * t) * env(t, 0.5),
       );
+    case "bao":
+      return tone(0.22, (t) => Math.sin(2 * Math.PI * 880 * t) * env(t, 0.22));
+    case "ping":
+      return tone(0.36, (t) => {
+        const f = t < 0.18 ? 392 : 494;
+        return Math.sin(2 * Math.PI * f * t) * env(t, 0.36);
+      });
   }
 }
 

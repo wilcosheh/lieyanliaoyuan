@@ -1,7 +1,7 @@
 import { pinyin } from "pinyin-pro";
 
 export const SIMUL_MS = 300;
-export const MATCH_MS = 120_000;
+export const MATCH_MS = 600_000;
 export const HP = 30;
 export const MANA_START = 4;
 export const MANA_CAP = 10;
@@ -98,6 +98,8 @@ export const SFX_NAMES = [
   "duan",
   "sheng",
   "bai",
+  "bao",
+  "ping",
 ] as const;
 
 export type SfxName = (typeof SFX_NAMES)[number];
@@ -298,6 +300,7 @@ export type World = {
   winner: string | null;
   endReason: string;
   log: string[];
+  round: number;
 };
 
 export type AudioJob = {
@@ -310,7 +313,7 @@ export type AudioJob = {
 
 export type RoomState = {
   world: World;
-  pending: Record<string, { rpcId: RpcId; tool: string }>;
+  pending: Record<string, { rpcId: RpcId; tool: string; since: number }>;
   queued: Record<string, Line[]>;
   audio: Record<string, AudioJob>;
 };
@@ -328,10 +331,13 @@ export type JsonResult = {
 export type OutItem = { deviceId: string; body: JsonResult };
 
 export const LOBBY_PROMPT =
-  "你是烈焰燎原的房间主持人。你只把工具返回的文本原样说出来，不补充、不解释。玩家报出名字就调用 set_name。玩家要开房间就调用 create_room。玩家说出四位房间号就调用 join_room。玩家说准备就调用 ready，并一直等到它返回。每说完一句就调用 wait_event，直到它返回。文本如果只有一个句号，不要出声，立刻再调用 wait_event。准备完成前不要调用 cast。";
+  "你是烈焰燎原的房间主持人。你必须先把工具返回的文本原样说出来，不补充、不解释、不加表情，不要说为您播放，不要说正在播放，说完才能调用下一个工具。不要询问房间名称。玩家报出名字就调用 set_name。玩家要开房间就立刻调用 create_room。玩家说出四位房间号就调用 join_room。玩家说准备就调用 ready。文本如果是三二一开战，要一口气原样念完。开战之后先把血量原样说出来，玩家接着说的每一句都调用 cast，utterance 是玩家原话。血量到0才分胜负，中间可以打很多回合。玩家说看血就调用 match_status。玩家说投降就调用 surrender。文本如果只有一个句号，不要出声，立刻再调用 wait_event。工具超时、被取消或失败，也不要出声，立刻再调用 wait_event。";
 
 export const BATTLE_PROMPT =
-  "你是烈焰燎原的战场播报。玩家每说完一句，立刻调用 cast，utterance 必须是玩家原话，一字不改。说完工具结果后立刻调用 wait_event，直到它返回。你只许把工具返回的文本原样说出来，不解释、不读网址和 JSON。文本如果只有一个句号，不要出声，立刻再调用 wait_event。wait_event 超时、被取消或失败，马上再次调用。玩家说投降就调用 surrender。玩家说看血就调用 match_status。";
+  "你是烈焰燎原的战场播报。你必须先把工具返回的文本原样说出来，比分和血量都要念，不要说为您播放，不要说正在播放，说完才能调用下一个工具。玩家每说完一句，立刻调用 cast，utterance 必须是玩家原话，一字不改。文本如果只有一个句号，不要出声，立刻再调用 wait_event。wait_event 超时、被取消或失败，马上再次调用。玩家说投降就调用 surrender。玩家说看血就调用 match_status。";
+
+// 灵矽大约 26 秒会取消还没返回的工具调用。提前交还句号，让模型自己再挂上。
+export const HOLD_MS = 18_000;
 
 export const REVIEW_PROMPT =
   "对局已经结束。你把工具返回的文本原样说出来。玩家说复盘就调用 review_last_match。玩家要再来一局，就调用 create_room 或 join_room。不要调用 cast。";
@@ -411,6 +417,7 @@ export function emptyRoom(code: string, host: Player): RoomState {
       winner: null,
       endReason: "",
       log: [],
+      round: 0,
     },
     pending: {},
     queued: {},
@@ -426,6 +433,18 @@ export function roomCodeOf(value: unknown): string {
   const digits = String(value ?? "").replace(/\D/g, "");
   if (digits.length < 4) return "";
   return digits.slice(-4);
+}
+
+export function roomCodeFromArgs(args: Record<string, unknown>): string {
+  const named = roomCodeOf(
+    args.code ?? args.room_id ?? args.roomId ?? args.room,
+  );
+  if (named) return named;
+  for (const value of Object.values(args)) {
+    const code = roomCodeOf(value);
+    if (code) return code;
+  }
+  return "";
 }
 
 export type ToolOp = {
@@ -482,6 +501,7 @@ export function reduce(input: RoomState, op: Op): {
     removePlayer(state, op.deviceId, op.now, op.sfxBase, add);
   } else if (op.type === "tick") {
     settleDue(state, op.now, op.sfxBase, add);
+    releaseHolds(state, op.now, op.sfxBase, bucket, extra);
   } else if (op.type === "audio") {
     delete state.audio[op.deviceId];
     if (op.url) {
@@ -566,12 +586,17 @@ function applyTool(
       }
       self.ready = true;
       if (!bothReady(state)) {
-        state.pending[op.deviceId] = { rpcId: op.rpcId, tool: "ready" };
+        state.pending[op.deviceId] = {
+          rpcId: op.rpcId,
+          tool: "ready",
+          since: op.now,
+        };
         return true;
       }
       startMatch(state, op.now);
       for (const p of state.world.players) {
-        add(p.deviceId, openingLine());
+        delete state.queued[p.deviceId];
+        add(p.deviceId, openingLine(state, p, op.sfxBase, op.now));
       }
       state.world.log.push("开战");
       return false;
@@ -584,7 +609,11 @@ function applyTool(
       settleDue(state, op.now, op.sfxBase, add);
       const queued = state.queued[op.deviceId] ?? [];
       if (queued.length === 0 && !fresh(op.deviceId)) {
-        state.pending[op.deviceId] = { rpcId: op.rpcId, tool: "wait_event" };
+        state.pending[op.deviceId] = {
+          rpcId: op.rpcId,
+          tool: "wait_event",
+          since: op.now,
+        };
         return true;
       }
       return false;
@@ -601,22 +630,14 @@ function applyTool(
             op.deviceId,
             speak(
               state.world.phase === "ended"
-                ? verdictFor(state, self)
+                ? `${verdictFor(state, self)}${scoreText(state, self)}`
                 : "还没开战。",
             ),
           );
         }
         return false;
       }
-      const opp = other(state, self.deviceId);
-      add(
-        op.deviceId,
-        speak(
-          `你${self.hp}血，法力${manaOf(self, op.now)}。对手${
-            opp ? opp.hp : 0
-          }血。`,
-        ),
-      );
+      add(op.deviceId, battleStatus(state, self, op.sfxBase, op.now, "看血。"));
       return false;
     }
     case "surrender": {
@@ -739,15 +760,16 @@ function castSpell(
   self.mana -= spell.mana;
   if (spell.cooldownMs > 0) self.cds[spell.id] = now + spell.cooldownMs;
 
-  if (opp.channel && opp.channel.resolveAt - now > SIMUL_MS) {
+  // 瞬发才能打断吟唱。寒霜止步对上烈焰燎原时，两段吟唱各算各的。
+  if (
+    spell.channelMs === 0 && opp.channel &&
+    opp.channel.resolveAt - now > SIMUL_MS
+  ) {
     const broken = spellById(opp.channel.spellId);
     opp.channel = null;
     opp.silenceUntil = Math.max(opp.silenceUntil, now + INTERRUPT_SILENCE_MS);
     state.world.log.push(`${self.name}打断${opp.name}的${broken.name}`);
-    add(
-      opp.deviceId,
-      speak("吟唱被打断。", [play(op.sfxBase, "duan", "打断")]),
-    );
+    add(opp.deviceId, speak("吟唱被打断。"));
   }
 
   if (spell.channelMs > 0) {
@@ -757,8 +779,8 @@ function castSpell(
       resolveAt: now + spell.channelMs,
     };
     state.world.log.push(`${self.name}开始吟唱${spell.name}`);
-    add(self.deviceId, speak(`吟唱${spell.name}。`));
-    add(opp.deviceId, speak(`对手吟唱${spell.name}。`));
+    add(self.deviceId, speak(`你开始吟唱${spell.name}。`));
+    add(opp.deviceId, speak(`对手开始吟唱${spell.name}。`));
     noteAudio(state, self, opp, utterance, op, add);
     return;
   }
@@ -865,25 +887,41 @@ function emitEffect(
   const caster = player(state, effect.casterId);
   const target = player(state, effect.targetId);
   if (!caster || !target) return;
-  const sfx = [play(sfxBase, effect.spell.sfx, effect.spell.name)];
+  state.world.round = (state.world.round ?? 0) + 1;
+  void sfxBase;
+  const round = `第${state.world.round}回合。`;
+  const casterHp = `你${caster.hp}血。对手${effect.targetHp}血。`;
+  const targetHp = `你${effect.targetHp}血。对手${caster.hp}血。`;
   if (effect.shield) {
-    add(caster.deviceId, speak(`${effect.spell.name}张开。`, sfx));
-    add(target.deviceId, speak(`对手张开${effect.spell.name}。`, sfx));
+    add(
+      caster.deviceId,
+      speak(`${round}${effect.spell.name}张开。${casterHp}`),
+    );
+    add(
+      target.deviceId,
+      speak(`${round}对手张开${effect.spell.name}。${targetHp}`),
+    );
     return;
   }
   const verb = effect.grade === "perfect" ? "命中" : "擦中";
   if (effect.absorbedAll) {
-    add(caster.deviceId, speak(`${effect.spell.name}被挡住。`, sfx));
-    add(target.deviceId, speak(`水幕挡住${effect.spell.name}。`, sfx));
+    add(
+      caster.deviceId,
+      speak(`${round}${effect.spell.name}被挡住。${casterHp}`),
+    );
+    add(
+      target.deviceId,
+      speak(`${round}水幕挡住${effect.spell.name}。${targetHp}`),
+    );
     return;
   }
   add(
     caster.deviceId,
-    speak(`${effect.spell.name}${verb}。对手${effect.targetHp}血。`, sfx),
+    speak(`${round}${effect.spell.name}${verb}。${casterHp}`),
   );
   add(
     target.deviceId,
-    speak(`对手${effect.spell.name}。你${effect.targetHp}血。`, sfx),
+    speak(`${round}中了${effect.spell.name}。${targetHp}`),
   );
 }
 
@@ -919,10 +957,7 @@ function timeout(
 ) {
   const [a, b] = state.world.players;
   if (!a || !b) return;
-  let winner = "draw";
-  if (a.hp > b.hp) winner = a.deviceId;
-  else if (b.hp > a.hp) winner = b.deviceId;
-  finish(state, winner, "timeout");
+  finish(state, "draw", "timeout");
   state.world.log.push("时间到");
   add(a.deviceId, verdictLine(state, a, sfxBase, "时间到。"));
   add(b.deviceId, verdictLine(state, b, sfxBase, "时间到。"));
@@ -975,6 +1010,7 @@ function startMatch(state: RoomState, now: number) {
   state.world.winner = null;
   state.world.endReason = "";
   state.world.log = [];
+  state.world.round = 0;
   for (const p of state.world.players) {
     p.hp = HP;
     p.mana = MANA_START;
@@ -987,10 +1023,44 @@ function startMatch(state: RoomState, now: number) {
   }
 }
 
-function openingLine(): Line {
+function openingLine(
+  state: RoomState,
+  p: Player,
+  _sfxBase: string,
+  _now: number,
+): Line {
   return speak(
-    `开战。你${HP}血，法力${MANA_START}。念火矢、水幕、寒霜止步、烈焰燎原，或九天神火焚尽八荒。`,
-    [changeRole(BATTLE_PROMPT)],
+    `三。二。一。开战。双方各${p.hp}血。血量先到0的一方落败。开始念咒。`,
+  );
+}
+
+function scoreText(state: RoomState, p: Player): string {
+  const opp = other(state, p.deviceId);
+  const mine = p.hp;
+  const theirs = opp ? opp.hp : 0;
+  const pace = mine > theirs
+    ? "你领先。"
+    : mine < theirs
+    ? "你落后。"
+    : "血量持平。";
+  return `${pace}你${mine}血。对手${theirs}血。`;
+}
+
+function battleStatus(
+  state: RoomState,
+  p: Player,
+  sfxBase: string,
+  now: number,
+  leadIn: string,
+): Line {
+  const played = state.world.round > 0
+    ? `已经打了${state.world.round}回合。`
+    : "";
+  void sfxBase;
+  return speak(
+    `${leadIn}${played}${scoreText(state, p)}法力${
+      manaOf(p, now)
+    }。血量到0才分胜负。继续念火矢、水幕、寒霜止步、烈焰燎原或九天神火。`,
   );
 }
 
@@ -1007,20 +1077,10 @@ function verdictLine(
   sfxBase: string,
   prefix: string,
 ): Line {
+  void sfxBase;
   const verdict = verdictFor(state, p);
-  const sfx = verdict === "你赢了。"
-    ? "sheng"
-    : verdict === "你输了。"
-    ? "bai"
-    : "duan";
-  const title = verdict === "你赢了。"
-    ? "胜利"
-    : verdict === "你输了。"
-    ? "落败"
-    : "平局";
-  return speak(`${prefix}${verdict}`, [
+  return speak(`${prefix}${verdict}${scoreText(state, p)}`, [
     changeRole(REVIEW_PROMPT),
-    play(sfxBase, sfx, title),
   ]);
 }
 
@@ -1058,33 +1118,134 @@ function flush(
   if (immediateId && rpcId !== null) {
     const prev = state.queued[immediateId] ?? [];
     const lines = bucket.get(immediateId) ?? [];
-    if (prev.length || lines.length) {
-      delete state.queued[immediateId];
-      bucket.delete(immediateId);
-      out.push({
-        deviceId: immediateId,
-        body: toolResult(rpcId, fold([...prev, ...lines])),
-      });
+    delete state.queued[immediateId];
+    bucket.delete(immediateId);
+    if (lines.length) {
+      out.push(ship(state, immediateId, rpcId, lines));
+      const rest = state.queued[immediateId] ?? [];
+      if (prev.length || rest.length) {
+        state.queued[immediateId] = [...prev, ...rest];
+      }
+    } else if (prev.length) {
+      out.push(ship(state, immediateId, rpcId, prev));
     }
   }
   for (const [deviceId, lines] of bucket) {
     const prev = state.queued[deviceId] ?? [];
     delete state.queued[deviceId];
-    const line = fold([...prev, ...lines]);
     const pending = state.pending[deviceId];
     if (pending && canFulfill(state, pending.tool)) {
       delete state.pending[deviceId];
-      out.push({ deviceId, body: toolResult(pending.rpcId, line) });
+      out.push(ship(state, deviceId, pending.rpcId, [...prev, ...lines]));
       continue;
     }
-    state.queued[deviceId] = [line];
+    const kept = [...prev, ...lines];
+    if (kept.length) state.queued[deviceId] = kept;
   }
   return out;
 }
 
-function canFulfill(state: RoomState, tool: string): boolean {
-  if (tool === "wait_event") return true;
-  return tool === "ready" && state.world.phase === "battle";
+function releaseHolds(
+  state: RoomState,
+  now: number,
+  sfxBase: string,
+  bucket: Map<string, Line[]>,
+  extra: OutItem[],
+) {
+  for (const deviceId of Object.keys(state.pending)) {
+    const pending = state.pending[deviceId];
+    if (!pending) continue;
+    if (typeof pending.since !== "number") {
+      pending.since = now;
+      continue;
+    }
+    if (now - pending.since < HOLD_MS) continue;
+    const prev = state.queued[deviceId] ?? [];
+    const fresh = bucket.get(deviceId) ?? [];
+    delete state.queued[deviceId];
+    bucket.delete(deviceId);
+    delete state.pending[deviceId];
+    const kept = [...prev, ...fresh];
+    const self = player(state, deviceId);
+    const beat = state.world.phase === "battle" && self
+      ? battleStatus(state, self, sfxBase, now, "对战中。")
+      : speak("。");
+    extra.push(
+      ship(
+        state,
+        deviceId,
+        pending.rpcId,
+        kept.length ? kept : [beat],
+      ),
+    );
+  }
+}
+
+function present(
+  state: RoomState,
+  deviceId: string,
+  rpcId: RpcId,
+  line: Line,
+): OutItem {
+  const role = line.funcs.find((func) => func.name === "change_role");
+  const rest = line.funcs.filter((func) => func.name !== "change_role");
+  const spoken = !role || (line.text === "。" && rest.length === 0)
+    ? line
+    : { text: line.text, funcs: rest };
+  if (role && spoken !== line) {
+    const queued = state.queued[deviceId] ?? [];
+    queued.push(speak("。", [role]));
+    state.queued[deviceId] = queued;
+  }
+  return { deviceId, body: toolResult(rpcId, spoken) };
+}
+
+function canFulfill(_state: RoomState, tool: string): boolean {
+  return tool === "wait_event" || tool === "ready";
+}
+
+function ship(
+  state: RoomState,
+  deviceId: string,
+  rpcId: RpcId,
+  lines: Line[],
+): OutItem {
+  const { now, later } = speakOne(lines);
+  if (later.length) {
+    const queued = state.queued[deviceId] ?? [];
+    state.queued[deviceId] = [...later, ...queued];
+  }
+  return present(state, deviceId, rpcId, fold(now));
+}
+
+// 一句一句交给主持人念。胜负和对方原声跟在当前这句后面，下一则战报留到下一次。
+function speakOne(lines: Line[]): { now: Line[]; later: Line[] } {
+  if (lines.length === 0) return { now: [speak("。")], later: [] };
+  const now = [lines[0]!];
+  let index = 1;
+  if (lines[0]!.text.includes("吟唱被打断") && index < lines.length) {
+    now.push(lines[index]!);
+    index++;
+  }
+  while (index < lines.length && attaches(lines[index]!)) {
+    now.push(lines[index]!);
+    index++;
+  }
+  return { now, later: lines.slice(index) };
+}
+
+function attaches(line: Line): boolean {
+  if (spellPlay(line)) return false;
+  return line.text.startsWith("对方原声") ||
+    /你赢了|你输了|平局/.test(line.text);
+}
+
+function spellPlay(line: Line): boolean {
+  return line.funcs.some((func) => {
+    if (func.name !== "linx_play") return false;
+    const url = func.arguments.audio_url ?? "";
+    return /\/sfx\/(huoshi|shuimu|hanshuang|lieyan|jiutian)\.wav$/.test(url);
+  });
 }
 
 function fold(lines: Line[]): Line {

@@ -5,7 +5,7 @@ import {
   makePlayer,
   peekAudio,
   reduce,
-  roomCodeOf,
+  roomCodeFromArgs,
   type RoomState,
   type RpcId,
   speak,
@@ -25,13 +25,18 @@ export type CallInput = {
   now: number;
 };
 
+export type Delivery = { id: number | string | null; body: unknown };
+
 export interface Store {
   call(input: CallInput): Promise<void>;
-  tick(now: number, sfxBase: string): Promise<void>;
+  tick(now: number, sfxBase: string, deviceId?: string | null): Promise<void>;
   audioPass(now: number, lookup: ChantLookup): Promise<void>;
   cancel(deviceId: string, rpcId: RpcId): Promise<void>;
   deliver(deviceId: string, body: unknown): Promise<void>;
-  drain(deviceId: string | null): Promise<unknown[]>;
+  hold(deviceId: string): Promise<void>;
+  release(deviceId: string): Promise<void>;
+  drain(deviceId: string | null, holder?: boolean): Promise<Delivery[]>;
+  ack(ids: Array<number | string>): Promise<void>;
   wait(ms: number): Promise<void>;
 }
 
@@ -42,6 +47,7 @@ export class MemoryStore implements Store {
   private where = new Map<string, string>();
   private names = new Map<string, string>();
   private out: Box[] = [];
+  private held = new Set<string>();
   private lock: Promise<void> = Promise.resolve();
   private kick = new Set<() => void>();
 
@@ -84,10 +90,11 @@ export class MemoryStore implements Store {
     });
   }
 
-  tick(now: number, sfxBase: string): Promise<void> {
+  tick(now: number, sfxBase: string, _deviceId?: string | null): Promise<void> {
     return this.run(() => {
       for (const [code, state] of [...this.rooms]) {
-        if (state.world.phase !== "battle") continue;
+        const held = Object.keys(state.pending).length > 0;
+        if (state.world.phase !== "battle" && !held) continue;
         const reduced = reduce(state, { type: "tick", now, sfxBase });
         this.push(reduced.outbox);
         this.commit(code, reduced.state);
@@ -148,21 +155,36 @@ export class MemoryStore implements Store {
     });
   }
 
-  drain(deviceId: string | null): Promise<unknown[]> {
+  hold(deviceId: string): Promise<void> {
     return this.run(() => {
-      if (deviceId === null) {
-        const all = this.out.splice(0);
-        return all.map((item) => item.body);
-      }
+      this.held.add(deviceId);
+    });
+  }
+
+  release(deviceId: string): Promise<void> {
+    return this.run(() => {
+      this.held.delete(deviceId);
+    });
+  }
+
+  drain(deviceId: string | null, holder = false): Promise<Delivery[]> {
+    return this.run(() => {
+      const take = (item: Box) =>
+        (deviceId === null || item.key === deviceId) &&
+        (holder || !this.held.has(item.key));
       const keep: Box[] = [];
-      const taken: unknown[] = [];
+      const taken: Delivery[] = [];
       for (const item of this.out) {
-        if (item.key === deviceId) taken.push(item.body);
+        if (take(item)) taken.push({ id: null, body: item.body });
         else keep.push(item);
       }
       this.out = keep;
       return taken;
     });
+  }
+
+  ack(_ids: Array<number | string>): Promise<void> {
+    return Promise.resolve();
   }
 
   wait(ms: number): Promise<void> {
@@ -216,7 +238,7 @@ export class MemoryStore implements Store {
   }
 
   private joinRoom(input: CallInput) {
-    const code = roomCodeOf(input.args.code);
+    const code = roomCodeFromArgs(input.args);
     if (!code || !this.rooms.has(code)) {
       this.push([{
         deviceId: input.deviceId,

@@ -59,20 +59,22 @@ async function main() {
     const [openA, openB] = await Promise.all([readyA, readyB]);
     must(text(openA).includes("开战"), text(openA));
     must(text(openB).includes("开战"), text(openB));
+    must(text(openA).includes("三"), text(openA));
     must(
-      funcs(openA).some((fn) => fn.name === "change_role"),
-      "开战没有切换战场播报",
+      !funcs(openA).some((fn) => fn.name === "change_role"),
+      "开战播报不该和切角色绑在同一次返回",
     );
+    must(text(openA).includes("30血"), text(openA));
 
     const heard = b.call("wait_event");
     await sleep(30);
     const shot = await a.call("cast", { utterance: "火矢" });
     const news = await heard;
     must(text(shot).includes("火矢命中"), text(shot));
-    must(text(news).includes("对手火矢"), text(news));
+    must(text(news).includes("中了火矢"), text(news));
     must(
-      urls(news).some((url) => url.endsWith("/sfx/huoshi.wav")),
-      `缺少火矢音效 ${text(news)}`,
+      urls(news).every((url) => !url.includes("/sfx/")),
+      `战报不该套播放 ${text(news)}`,
     );
     must(
       !urls(news).some((url) => url.includes("chant.example")),
@@ -92,7 +94,7 @@ async function main() {
     const chanted = await b.call("cast", { utterance: "烈焰燎原" });
     const heardChant = await casting;
     must(text(chanted).includes("吟唱烈焰燎原"), text(chanted));
-    must(text(heardChant).includes("对手吟唱烈焰燎原"), text(heardChant));
+    must(text(heardChant).includes("对手开始吟唱烈焰燎原"), text(heardChant));
 
     await sleep(120);
     const broken = b.call("wait_event");
@@ -101,8 +103,8 @@ async function main() {
     must(text(interrupt).includes("火矢命中"), text(interrupt));
     must(text(victim).includes("吟唱被打断"), text(victim));
     must(
-      urls(victim).some((url) => url.endsWith("/sfx/duan.wav")),
-      "缺少打发音效",
+      urls(victim).every((url) => !url.includes("/sfx/")),
+      "打断不该套播放",
     );
 
     const winWait = a.call("wait_event");
@@ -110,22 +112,18 @@ async function main() {
     const won = await winWait;
     must(text(surrendered).includes("你认输了"), text(surrendered));
     must(text(won).includes("你赢了"), text(won));
+    must(urls(won).every((url) => !url.includes("/sfx/")), "胜利不该套播放");
     must(
-      urls(won).some((url) => url.endsWith("/sfx/sheng.wav")),
-      "缺少胜利音效",
+      urls(surrendered).every((url) => !url.includes("/sfx/")),
+      "认输不该套播放",
     );
+    const reviewRole = await a.call("wait_event");
     must(
-      urls(surrendered).some((url) => url.endsWith("/sfx/bai.wav")),
-      "缺少落败音效",
-    );
-    must(
-      funcs(won).some((fn) => fn.name === "change_role"),
+      funcs(reviewRole).some((fn) => fn.name === "change_role"),
       "结算没有切回复盘",
     );
 
-    const sample = urls(news).find((url) => url.endsWith("/sfx/huoshi.wav"));
-    must(!!sample, "没有可拉取的音效地址");
-    const wav = await fetch(sample!);
+    const wav = await fetch(`${root}/sfx/huoshi.wav`);
     const bytes = new Uint8Array(await wav.arrayBuffer());
     must(
       wav.ok && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 &&

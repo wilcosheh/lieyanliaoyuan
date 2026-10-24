@@ -1,0 +1,75 @@
+# PR 合并进 main（push main）后：先跑测试，再部署到 Supabase。
+#
+# 仓库 Secrets（Settings → Secrets and variables → Actions）：
+#   SUPABASE_ACCESS_TOKEN  — https://supabase.com/dashboard/account/tokens
+#   SUPABASE_PROJECT_REF   — 项目 ref，例如 acqvpmrtdxtwsfendxrd
+#   SUPABASE_DB_PASSWORD   — 项目数据库密码（db push 用）
+# 可选：
+#   LINX_API_KEY / LINX_API_BASE — 有则写入 Edge secrets（对方原声）
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-supabase-main
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno fmt --check
+      - run: deno lint
+      - run: deno test -A
+      - run: deno run -A scripts/sim_match.ts
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check secrets
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "缺少 SUPABASE_ACCESS_TOKEN"; exit 1; }
+          test -n "$SUPABASE_PROJECT_REF" || { echo "缺少 SUPABASE_PROJECT_REF"; exit 1; }
+          test -n "$SUPABASE_DB_PASSWORD" || { echo "缺少 SUPABASE_DB_PASSWORD"; exit 1; }
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Push database migrations
+        run: supabase db push
+
+      - name: Set function secrets
+        env:
+          LINX_API_KEY: ${{ secrets.LINX_API_KEY }}
+          LINX_API_BASE: ${{ secrets.LINX_API_BASE }}
+        run: |
+          supabase secrets set \
+            PUBLIC_BASE_URL="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/mcp"
+          if [ -n "${LINX_API_KEY:-}" ]; then
+            supabase secrets set \
+              LINX_API_KEY="$LINX_API_KEY" \
+              LINX_API_BASE="${LINX_API_BASE:-https://xrobo.qiniu.com}"
+          fi
+
+      - name: Deploy mcp function
+        run: |
+          supabase functions deploy mcp --no-verify-jwt --project-ref "$SUPABASE_PROJECT_REF"
+          echo "MCP URL: https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/mcp"

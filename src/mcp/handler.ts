@@ -20,11 +20,24 @@ const TOOLS = [
   tool("set_name", "记下玩家名字。玩家自报姓名时调用。", {
     name: { type: "string" },
   }, ["name"]),
-  tool("create_room", "开一间双人对战房，返回四位房间号。", {}, []),
-  tool("join_room", "用四位房间号加入。", { code: { type: "string" } }, [
-    "code",
-  ]),
-  tool("ready", "准备开战。双方都准备后才返回。返回前不要催玩家念咒。", {}, []),
+  tool(
+    "create_room",
+    "立刻开房，不要询问房间名称。返回四位房间号后，同一个回合里立刻调用 wait_event，直到听到对手来了。不要自己改写工具文本。",
+    {},
+    [],
+  ),
+  tool(
+    "join_room",
+    "用四位房间号加入。房间号放在 code 或 room_id。返回后立刻调用 wait_event。",
+    { code: { type: "string" }, room_id: { type: "string" } },
+    ["code"],
+  ),
+  tool(
+    "ready",
+    "准备开战。双方准备好后返回开战比分，必须原样说出来，然后立刻调用 wait_event。",
+    {},
+    [],
+  ),
   tool(
     "cast",
     "施放咒语。utterance 必须是玩家刚刚说的原话，一字不改。",
@@ -33,11 +46,16 @@ const TOOLS = [
   ),
   tool(
     "wait_event",
-    "等待下一则战报。没有消息时挂起。返回后立刻再调用。",
+    "挂起直到下一则战报。对战中会返回双方血量、法力和剩余时间，必须原样说出来，然后立刻再调用。文本如果只有句号，不要出声，立刻再调用。",
     {},
     [],
   ),
-  tool("match_status", "查看双方血量和自己的法力。", {}, []),
+  tool(
+    "match_status",
+    "查看双方血量、法力、领先落后和剩余时间，必须原样说出来。",
+    {},
+    [],
+  ),
   tool("surrender", "认输并立刻结束这局。", {}, []),
   tool("review_last_match", "对局结束后复盘刚刚那一局。", {}, []),
 ];
@@ -83,6 +101,9 @@ export function handle(req: Request, ctx: ServerCtx): Promise<Response> {
   if (route.kind === "sse" && req.method === "GET") {
     return Promise.resolve(sse(req, ctx));
   }
+  if (route.kind === "sse" && req.method === "POST") {
+    return streamable(req, ctx);
+  }
   if (route.kind === "message" && req.method === "POST") {
     return message(req, ctx);
   }
@@ -92,6 +113,7 @@ export function handle(req: Request, ctx: ServerCtx): Promise<Response> {
 function sse(req: Request, ctx: ServerCtx): Response {
   const deviceId = header(req, "x-linx-device-id");
   const sessionId = crypto.randomUUID();
+  const box = deviceId ?? sessionId;
   const base = publicBase(req);
   const encoder = new TextEncoder();
   let closed = false;
@@ -134,10 +156,17 @@ function sse(req: Request, ctx: ServerCtx): Response {
         while (!closed && !req.signal.aborted) {
           const now = gameNow(ctx.timeScale);
           try {
-            await ctx.store.tick(now, base);
+            await ctx.store.tick(now, base, box);
             await ctx.store.audioPass(now, ctx.lookup);
-            const msgs = await ctx.store.drain(deviceId);
-            for (const msg of msgs) send("message", JSON.stringify(msg));
+            const msgs = await ctx.store.drain(box, false);
+            const sent: Array<number | string> = [];
+            for (const msg of msgs) {
+              if (closed) break;
+              send("message", JSON.stringify(msg.body));
+              if (closed) break;
+              if (msg.id !== null) sent.push(msg.id);
+            }
+            if (sent.length) await ctx.store.ack(sent);
           } catch (error) {
             console.error("sse pump", error);
           }
@@ -166,11 +195,81 @@ function sse(req: Request, ctx: ServerCtx): Response {
   });
 }
 
+async function streamable(req: Request, ctx: ServerCtx): Promise<Response> {
+  const url = new URL(req.url);
+  const key = identity(req, url);
+  const session = header(req, "mcp-session-id") ?? crypto.randomUUID();
+  await ctx.store.hold(key);
+  try {
+    let payload: JsonRpc = {};
+    try {
+      payload = await req.clone().json();
+    } catch {
+      payload = {};
+    }
+    const id = payload.id ?? null;
+    const method = String(payload.method ?? "");
+    const expect = id !== null && !method.startsWith("notifications/");
+    await message(req, ctx);
+    if (!expect) return accepted(session);
+    const body = await waitFor(ctx, req, key, id);
+    if (!wantsEventStream(req)) return json(body, 200, session);
+    return new Response(`event: message\ndata: ${JSON.stringify(body)}\n\n`, {
+      status: 200,
+      headers: {
+        ...cors(),
+        ...sessionHeader(session),
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+      },
+    });
+  } finally {
+    await ctx.store.release(key);
+  }
+}
+
+function wantsEventStream(req: Request): boolean {
+  const accept = req.headers.get("accept") ?? "";
+  return accept.includes("text/event-stream") || accept.includes("*/*") ||
+    accept === "";
+}
+
+async function waitFor(
+  ctx: ServerCtx,
+  req: Request,
+  key: string,
+  id: RpcId,
+): Promise<unknown> {
+  const deadline = Date.now() + 120_000;
+  const base = publicBase(req);
+  while (!req.signal.aborted && Date.now() < deadline) {
+    const now = gameNow(ctx.timeScale);
+    try {
+      await ctx.store.tick(now, base, key);
+      await ctx.store.audioPass(now, ctx.lookup);
+    } catch (error) {
+      console.error("streamable tick", error);
+    }
+    const msgs = await ctx.store.drain(key, true);
+    const mine = msgs.find((msg) => rpcIdOf(msg.body) === id);
+    for (const msg of msgs) {
+      if (msg === mine) {
+        if (msg.id !== null) await ctx.store.ack([msg.id]);
+        continue;
+      }
+      if (msg.id === null) await ctx.store.deliver(key, msg.body);
+    }
+    if (mine) return mine.body;
+    if (req.signal.aborted || Date.now() >= deadline) break;
+    await ctx.store.wait(150);
+  }
+  return toolError(id, "还没返回，请再调用一次。");
+}
+
 async function message(req: Request, ctx: ServerCtx): Promise<Response> {
   const url = new URL(req.url);
   const deviceId = header(req, "x-linx-device-id");
-  const sessionId = url.searchParams.get("sessionId");
-  const key = deviceId || sessionId || "global";
+  const key = identity(req, url);
   let payload: JsonRpc;
   try {
     payload = await req.json();
@@ -230,12 +329,12 @@ async function message(req: Request, ctx: ServerCtx): Promise<Response> {
   }
   if (method === "tools/call") {
     const name = String(params.name ?? "");
-    if (!deviceId) {
+    if (!deviceId && key === "global") {
       await ctx.store.deliver(key, toolError(id, "缺少设备标识"));
       return accepted();
     }
     await ctx.store.call({
-      deviceId,
+      deviceId: deviceId ?? key,
       agentId: header(req, "x-linx-agent-id") ?? "",
       sessionId: header(req, "x-linx-session-id") ?? "",
       rpcId: id,
@@ -294,18 +393,45 @@ function sfxResponse(name: string): Response {
   });
 }
 
-function accepted(): Response {
+function accepted(session?: string): Response {
   return new Response("accepted", {
     status: 202,
-    headers: { ...cors(), "content-type": "text/plain; charset=utf-8" },
+    headers: {
+      ...cors(),
+      ...sessionHeader(session),
+      "content-type": "text/plain; charset=utf-8",
+    },
   });
 }
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, session?: string): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...cors(), "content-type": "application/json; charset=utf-8" },
+    headers: {
+      ...cors(),
+      ...sessionHeader(session),
+      "content-type": "application/json; charset=utf-8",
+    },
   });
+}
+
+function sessionHeader(session?: string): Record<string, string> {
+  return session ? { "mcp-session-id": session } : {};
+}
+
+function identity(req: Request, url: URL): string {
+  return header(req, "x-linx-device-id") ??
+    url.searchParams.get("sessionId") ??
+    header(req, "mcp-session-id") ??
+    header(req, "x-linx-session-id") ??
+    "global";
+}
+
+function rpcIdOf(body: unknown): RpcId | null {
+  if (!body || typeof body !== "object") return null;
+  const id = (body as { id?: RpcId | null }).id;
+  if (id === undefined || id === null) return null;
+  return id;
 }
 
 function cors(): Record<string, string> {

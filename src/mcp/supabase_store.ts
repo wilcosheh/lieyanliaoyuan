@@ -6,14 +6,14 @@ import {
   type OutItem,
   peekAudio,
   reduce,
-  roomCodeOf,
+  roomCodeFromArgs,
   type RoomState,
   type RpcId,
   speak,
   toolResult,
 } from "../game/logic.ts";
 import type { ChantLookup } from "./audio.ts";
-import type { CallInput, Store } from "./store.ts";
+import type { CallInput, Delivery, Store } from "./store.ts";
 
 type RoomRow = { version: number; state: RoomState };
 
@@ -72,8 +72,17 @@ export class SupabaseStore implements Store {
       }));
   }
 
-  async tick(now: number, sfxBase: string): Promise<void> {
-    for (const code of await this.battleCodes()) {
+  async tick(
+    now: number,
+    sfxBase: string,
+    deviceId?: string | null,
+  ): Promise<void> {
+    const codes = new Set(await this.battleCodes());
+    if (deviceId) {
+      const code = await this.roomOf(deviceId);
+      if (code) codes.add(code);
+    }
+    for (const code of codes) {
       await this.mutate(
         code,
         (state) => reduce(state, { type: "tick", now, sfxBase }),
@@ -124,12 +133,36 @@ export class SupabaseStore implements Store {
     await this.insertOutbox([{ deviceId, body }]);
   }
 
-  async drain(deviceId: string | null): Promise<unknown[]> {
-    const res = await this.rpc(
-      deviceId ? "ly_drain" : "ly_drain_all",
-      deviceId ? { p_device: deviceId } : {},
-    );
-    return Array.isArray(res) ? res : [];
+  async hold(deviceId: string): Promise<void> {
+    const ok = await this.rpc("ly_hold", { p_device: deviceId });
+    if (ok === false) console.error("ly_hold failed", deviceId);
+  }
+
+  async release(deviceId: string): Promise<void> {
+    const ok = await this.rpc("ly_release", { p_device: deviceId });
+    if (ok === false) console.error("ly_release failed", deviceId);
+  }
+
+  async drain(deviceId: string | null, holder = false): Promise<Delivery[]> {
+    const res = await this.rpc("ly_peek", {
+      p_device: deviceId,
+      p_holder: holder,
+    });
+    if (!Array.isArray(res)) return [];
+    const out: Delivery[] = [];
+    for (const row of res) {
+      if (!row || typeof row !== "object") continue;
+      const item = row as { id?: unknown; body?: unknown };
+      const id = item.id;
+      if (typeof id !== "number" && typeof id !== "string") continue;
+      out.push({ id, body: item.body });
+    }
+    return out;
+  }
+
+  async ack(ids: Array<number | string>): Promise<void> {
+    if (!ids.length) return;
+    await this.rpc("ly_ack", { p_ids: ids });
   }
 
   wait(ms: number): Promise<void> {
@@ -168,7 +201,7 @@ export class SupabaseStore implements Store {
   }
 
   private async joinRoom(input: CallInput): Promise<void> {
-    const code = roomCodeOf(input.args.code);
+    const code = roomCodeFromArgs(input.args);
     if (!code || !await this.getRoom(code)) {
       await this.deliver(
         input.deviceId,
@@ -217,10 +250,16 @@ export class SupabaseStore implements Store {
     code: string,
     fn: (state: RoomState) => { state: RoomState; outbox: OutItem[] },
   ) {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
       const row = await this.getRoom(code);
       if (!row) return;
+      const before = JSON.stringify(row.state);
       const next = fn(row.state);
+      if (
+        next.outbox.length === 0 && JSON.stringify(next.state) === before
+      ) {
+        return;
+      }
       const ok = await this.rpc("ly_apply", {
         p_code: code,
         p_expected: row.version,
@@ -240,7 +279,7 @@ export class SupabaseStore implements Store {
         return;
       }
     }
-    console.error(`room ${code} busy`);
+    throw new Error(`room ${code} busy`);
   }
 
   private async roomOf(deviceId: string): Promise<string | null> {
@@ -322,7 +361,9 @@ export class SupabaseStore implements Store {
       throw new Error(`${path} ${res.status} ${await res.text()}`);
     }
     if (res.status === 204) return undefined as T;
-    return await res.json() as T;
+    const text = await res.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
   }
 
   private headers(extra?: HeadersInit): HeadersInit {

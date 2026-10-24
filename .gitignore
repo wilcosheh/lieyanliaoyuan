@@ -2,5 +2,6 @@
 .env.*
 !.env.example
 .supabase/
+supabase/.temp/
 .deno/
 *.log
