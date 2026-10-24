@@ -190,3 +190,7 @@ deno task test:battle
 ```bash
 deno task sim:battle
 ```
+
+## 协作
+
+提交、Issue 和 PR 见 [CONTRIBUTING.md](CONTRIBUTING.md)。
