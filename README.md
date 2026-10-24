@@ -116,7 +116,77 @@ service role。
 ## 目录
 
 - `src/game/logic.ts`：咒语、命中、打断、结算
+- `src/battle/index.ts`：新对局内核的公开入口
+- `src/battle/controller.ts`：唯一规则控制层，负责校验和阶段推进
+- `src/battle/state.ts`：拥有全部运行状态的内部状态机，不承载规则判断
+- `src/battle/skills.ts`：角色、技能和效果配置
+- `src/battle/session.ts`：按 `battleId` 加载、串行执行并保存对局请求
+- `src/battle/repository.ts`：带版本号和 CAS 的对局仓库接口及内存实现
+- `src/battle/supabase_repository.ts`：跨进程共享的 Supabase/Postgres 仓库实现
 - `src/mcp/handler.ts`：MCP SSE 和工具调用
 - `src/mcp/store.ts`：单进程内存房，本地和 `sim` 用它
 - `src/mcp/supabase_store.ts`：同一套规则落到 Postgres
 - `scripts/sim_match.ts`：两个假设备走完一局
+
+## 新对局内核
+
+`src/battle`
+只实现对局状态和规则，不处理客户端协议、提示文案或消息推送。请求处理代码应从
+`src/battle/index.ts` 使用 `BattleSessionService`，不要为每个请求自行创建
+`BattleController`，也不要直接调用 `state.ts` 的内部状态写方法。
+
+`BattleStateMachine`
+内部持有对局状态、回合状态、角色状态、状态效果、技能使用记录、事件序列和命令幂等记录，并提供无规则判断的增删改查。`BattleController`
+只持有状态机实例和不可变规则配置，所有合法性判断完成后再调用状态机变更数据。外部获得的都是深拷贝快照。
+
+```ts
+import {
+  BattleSessionService,
+  InMemoryBattleRepository,
+} from "./src/battle/index.ts";
+
+const repository = new InMemoryBattleRepository();
+const service = new BattleSessionService(repository);
+await service.createBattle({
+  battleId: "battle-1",
+  playerIds: ["player-a", "player-b"],
+});
+await service.preparePlayer("battle-1", "player-a", "swordsman");
+await service.preparePlayer("battle-1", "player-b", "guardian");
+await service.setReady("battle-1", "player-a");
+await service.setReady("battle-1", "player-b");
+await service.startBattle("battle-1");
+
+await service.submitAction("battle-1", {
+  playerId: "player-a",
+  commandId: "command-1",
+  roundNo: 1,
+  skillText: "破风斩",
+  perfection: 90, // 可省略，默认 100；只影响直接伤害和 DOT 伤害
+}); // WAITING_COMMAND -> SETTLING
+const current = await service.getBattle("battle-1");
+if (current.ok) {
+  await service.advance("battle-1", { expectedVersion: current.version });
+}
+```
+
+所有查询返回深拷贝快照。调用方不能提交伤害、治疗、护盾、状态或胜负结果，也不能通过修改返回对象影响真实对局。
+
+`InMemoryBattleRepository`
+只用于测试和单进程开发。生产环境必须让所有服务实例使用同一个
+`SupabaseBattleRepository`；迁移 `20261024160000_battle_sessions.sql` 以
+`battle_id` 为主键保存快照，并通过版本号 CAS 原子更新。不同设备只要提交相同的
+`battleId`，就会读取同一条权威记录。阶段推进建议携带查询所得的
+`expectedVersion`，避免重复请求跨过两个阶段。
+
+运行对局内核测试：
+
+```bash
+deno task test:battle
+```
+
+通过公开会话接口模拟一局完整对战：
+
+```bash
+deno task sim:battle
+```

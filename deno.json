@@ -2,7 +2,9 @@
   "tasks": {
     "dev": "deno run -A src/main.ts",
     "test": "deno test -A",
+    "test:battle": "deno test -A src/battle",
     "sim": "deno run -A scripts/sim_match.ts",
+    "sim:battle": "deno run -A scripts/sim_battle_engine.ts",
     "check": "deno fmt --check && deno lint && deno test -A && deno run -A scripts/sim_match.ts",
     "fmt": "deno fmt"
   },
