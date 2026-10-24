@@ -10,6 +10,9 @@ export type BattleRecord = {
 
 export type NewBattleRecord = Omit<BattleRecord, "version">;
 
+/**
+ * 对局权威状态仓库。save 必须以原子方式比较 expectedVersion，比较成功后才能写入。
+ */
 export interface BattleRepository {
   create(record: NewBattleRecord): Promise<BattleRecord>;
   load(battleId: string): Promise<BattleRecord | null>;
@@ -48,9 +51,8 @@ export class BattleVersionConflictError extends Error {
 }
 
 /**
- * Process-local repository for tests and single-process development. Production
- * deployments must provide a shared database/Redis implementation with the same
- * atomic compare-and-swap contract.
+ * 仅用于测试和单进程开发的内存仓库。
+ * 生产环境必须使用所有服务实例共享的数据库或 Redis 实现，并保持相同的原子 CAS 契约。
  */
 export class InMemoryBattleRepository implements BattleRepository {
   private readonly records = new Map<string, BattleRecord>();

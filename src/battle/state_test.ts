@@ -19,6 +19,7 @@ Deno.test("state machine owns state and applies mutations without rule validatio
     winnerPlayerId: "a",
     commandId: "cmd",
     skillId: "skill",
+    perfection: 100,
   });
 
   const state = machine.snapshot();
@@ -42,6 +43,7 @@ Deno.test("state machine manages players, usage, statuses and ordered events", (
     stacks: 1,
     sourcePlayerId: "a",
     sourceSkillId: "s1",
+    sourcePerfection: 100,
     appliedRound: 3,
     dispellable: true,
   });
@@ -99,7 +101,35 @@ Deno.test("state machine snapshots and query results cannot mutate owned state",
 Deno.test("state machine restores an isolated owned copy of a snapshot", () => {
   const source = createMachine();
   source.updatePlayer("a", { hp: 321 });
+  source.setCurrentRound({
+    roundNo: 1,
+    status: "SETTLING",
+    winnerPlayerId: "a",
+    commandId: "legacy-command",
+    skillId: "legacy-skill",
+    perfection: 100,
+  });
+  source.addStatusEffect("b", {
+    id: "legacy-dot",
+    kind: "DOT",
+    tag: "DOT",
+    value: 10,
+    remainingRounds: 1,
+    remainingTriggers: null,
+    stacks: 1,
+    sourcePlayerId: "a",
+    sourceSkillId: "legacy-skill",
+    sourcePerfection: 100,
+    appliedRound: 1,
+    dispellable: true,
+  });
   const snapshot = source.snapshot();
+  const legacy = snapshot as unknown as {
+    currentRound: { perfection?: number };
+    players: Array<{ statusEffects: Array<{ sourcePerfection?: number }> }>;
+  };
+  delete legacy.currentRound.perfection;
+  delete legacy.players[1]!.statusEffects[0]!.sourcePerfection;
   const restored = BattleStateMachine.restore(snapshot);
 
   snapshot.players[0]!.hp = 1;
@@ -108,4 +138,9 @@ Deno.test("state machine restores an isolated owned copy of a snapshot", () => {
   assertEquals(restored.getPlayer("a")?.hp, 321);
   assertEquals(restored.getPlayer("a")?.shield, 88);
   assertEquals(source.getPlayer("a")?.shield, 0);
+  assertEquals(restored.getCurrentRound()?.perfection, 100);
+  assertEquals(
+    restored.getPlayer("b")?.statusEffects[0]?.sourcePerfection,
+    100,
+  );
 });

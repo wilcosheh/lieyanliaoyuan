@@ -37,17 +37,23 @@ class Game {
     playerId: string,
     skillText: string,
     roundNo?: number,
+    perfection?: number,
   ): BattleResponse {
     return this.controller.submitAction({
       playerId,
       skillText,
       roundNo: roundNo ?? this.roundNo,
       commandId: `command-${++this.command}`,
+      perfection,
     });
   }
 
-  action(playerId: string, skillText: string): BattleResponse {
-    const accepted = this.submit(playerId, skillText);
+  action(
+    playerId: string,
+    skillText: string,
+    perfection?: number,
+  ): BattleResponse {
+    const accepted = this.submit(playerId, skillText, undefined, perfection);
     if (!accepted.ok) return accepted;
     const battle = this.controller.advance();
     if (!battle.ok || this.controller.getState().status === "FINISHED") {
@@ -146,6 +152,69 @@ Deno.test("skill text is exact and invalid actions do not consume the round", ()
   assertEquals(game.player("a").skillUsage, {});
   expectOk(game.action("a", "破风斩"));
   assertEquals(game.roundNo, 2);
+});
+
+Deno.test("skill perfection defaults to 100 and scales direct damage", () => {
+  const full = new Game();
+  const accepted = full.submit("a", "破风斩");
+  expectOk(accepted);
+  assertEquals(accepted.state.currentRound?.perfection, 100);
+  expectOk(full.controller.advance());
+  assertEquals(full.player("b").hp, 935);
+
+  const partial = new Game();
+  expectOk(partial.action("a", "破风斩", 90));
+  assertEquals(partial.player("b").hp, 941);
+  const damage = partial.controller.getState().events.findLast((event) =>
+    event.type === "DAMAGE_APPLIED"
+  );
+  assertEquals(damage?.payload.rawAmount, 65);
+  assertEquals(damage?.payload.perfection, 90);
+  assertEquals(damage?.payload.amount, 59);
+});
+
+Deno.test("skill perfection only scales damage in a composite skill", () => {
+  const game = new Game("guardian", "swordsman");
+  expectOk(game.action("a", "护阵回击", 50));
+  assertEquals(game.player("b").hp, 967);
+  assertEquals(game.player("a").shield, 40);
+});
+
+Deno.test("DOT keeps the perfection of the action that applied it", () => {
+  const game = new Game("archer", "guardian");
+  expectOk(game.action("a", "毒雨连射阵", 90));
+  const dot = game.player("b").statusEffects.find((effect) =>
+    effect.kind === "DOT"
+  );
+  assertEquals(dot?.value, 35);
+  assertEquals(dot?.sourcePerfection, 90);
+
+  expectOk(game.action("b", "守阵重击"));
+  assertEquals(game.player("b").hp, 968);
+  const tick = game.controller.getState().events.findLast((event) =>
+    event.type === "STATUS_TICK" && event.payload.tag === "DOT"
+  );
+  assertEquals(tick?.payload.rawValue, 35);
+  assertEquals(tick?.payload.perfection, 90);
+  assertEquals(tick?.payload.value, 32);
+});
+
+Deno.test("invalid perfection does not consume skill or round", () => {
+  const game = new Game();
+  for (const perfection of [-1, 100.1, Number.NaN]) {
+    expectError(
+      game.submit("a", "破风斩", undefined, perfection),
+      "INVALID_PERFECTION",
+    );
+  }
+  assertEquals(
+    game.controller.getState().currentRound?.status,
+    "WAITING_COMMAND",
+  );
+  assertEquals(game.player("a").skillUsage, {});
+
+  expectOk(game.action("a", "破风斩", 0));
+  assertEquals(game.player("b").hp, 1000);
 });
 
 Deno.test("basic skill is unlimited but cannot be used in consecutive rounds", () => {
@@ -388,11 +457,15 @@ Deno.test("command idempotency returns the original result without a second sett
     skillText: "锐刃突刺",
   };
   const first = game.controller.submitAction(input);
-  const second = game.controller.submitAction(input);
+  const second = game.controller.submitAction({ ...input, perfection: 100 });
   expectOk(first);
   expectOk(second);
   assertEquals(second.state, first.state);
   assertEquals(game.player("a").skillUsage.swordsman_thrust, 1);
+  expectError(
+    game.controller.submitAction({ ...input, perfection: 90 }),
+    "COMMAND_ALREADY_PROCESSED",
+  );
   expectError(
     game.controller.submitAction({
       ...input,

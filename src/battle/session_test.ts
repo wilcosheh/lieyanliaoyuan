@@ -110,6 +110,7 @@ Deno.test("a new service instance restores the complete battle", async () => {
     commandId: "before-restart",
     roundNo: 1,
     skillText: "破风斩",
+    perfection: 90,
   });
   expectOk(accepted);
 
@@ -117,6 +118,7 @@ Deno.test("a new service instance restores the complete battle", async () => {
   const beforeAdvance = await restartedService.getBattle("shared-battle");
   expectOk(beforeAdvance);
   assertEquals(beforeAdvance.state.currentRound?.status, "SETTLING");
+  assertEquals(beforeAdvance.state.currentRound?.perfection, 90);
   const advanced = await restartedService.advance("shared-battle", {
     expectedVersion: beforeAdvance.version,
   });
@@ -125,7 +127,7 @@ Deno.test("a new service instance restores the complete battle", async () => {
   assertEquals(
     advanced.state.players.find((player) => player.playerId === "player-b")
       ?.hp,
-    935,
+    941,
   );
 });
 

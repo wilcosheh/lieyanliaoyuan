@@ -162,6 +162,7 @@ await service.submitAction("battle-1", {
   commandId: "command-1",
   roundNo: 1,
   skillText: "破风斩",
+  perfection: 90, // 可省略，默认 100；只影响直接伤害和 DOT 伤害
 }); // WAITING_COMMAND -> SETTLING
 const current = await service.getBattle("battle-1");
 if (current.ok) {

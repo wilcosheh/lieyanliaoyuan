@@ -3,6 +3,7 @@ import {
   type BattleResponse,
   type ControllerOptions,
   type RuleErrorCode,
+  type SubmitActionInput,
 } from "./controller.ts";
 import {
   BattleAlreadyExistsError,
@@ -50,7 +51,10 @@ function sameState(left: BattleState, right: BattleState): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-/** Request-facing application service. It is the only owner of controller lifetimes. */
+/**
+ * 面向请求的对局应用服务，统一负责控制器的创建、恢复和销毁。
+ * 请求层只能调用这里暴露的方法，不能持有状态机或直接写入对局快照。
+ */
 export class BattleSessionService {
   private readonly queues = new Map<string, Promise<void>>();
 
@@ -69,6 +73,7 @@ export class BattleSessionService {
         options,
       );
       try {
+        // 固化创建时的完整角色配置，避免代码发布后改变正在进行的对局规则。
         const record = await this.repository.create({
           battleId: input.battleId,
           state: controller.getState(),
@@ -135,12 +140,7 @@ export class BattleSessionService {
 
   async submitAction(
     battleId: string,
-    input: {
-      playerId: string;
-      commandId: string;
-      roundNo: number;
-      skillText: string;
-    },
+    input: SubmitActionInput,
     guard: MutationGuard = {},
   ): Promise<BattleSessionResponse> {
     return await this.mutate(
@@ -178,6 +178,8 @@ export class BattleSessionService {
     options: MutateOptions,
   ): Promise<BattleSessionResponse<T>> {
     return await this.runExclusive(battleId, async () => {
+      // 抢招等带业务前置条件的操作可在版本冲突后重新校验；阶段推进不能自动重试，
+      // 否则同一次请求可能连续跨过 SETTLING 和 ENDING 两个阶段。
       const maxAttempts = options.retryOnConflict ? 3 : 1;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const record = await this.repository.load(battleId);
@@ -186,15 +188,18 @@ export class BattleSessionService {
           options.expectedVersion !== undefined &&
           options.expectedVersion !== record.version
         ) {
+          // 调用方基于旧快照发起的请求不能覆盖当前权威状态。
           return this.sessionError("VERSION_CONFLICT", record);
         }
 
+        // 每次请求都从仓库快照恢复一个临时控制器，请求结束后不缓存控制器实例。
         const controller = BattleController.restore(
           record.state,
           record.controllerOptions,
         );
         const response = operation(controller);
         if (sameState(record.state, response.state)) {
+          // 幂等重放没有产生新状态，不递增仓库版本号。
           return this.controllerResponse(response, record.version);
         }
 
@@ -220,6 +225,7 @@ export class BattleSessionService {
     battleId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
+    // 同一进程内按 battleId 排队；跨进程并发由仓库的版本号 CAS 处理。
     const previous = this.queues.get(battleId) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {

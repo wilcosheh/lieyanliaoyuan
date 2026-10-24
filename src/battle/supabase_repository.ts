@@ -14,6 +14,7 @@ type BattleRow = {
   controller_options: BattleRecord["controllerOptions"];
 };
 
+/** 使用 Supabase/Postgres 保存跨进程共享的对局权威快照。 */
 export class SupabaseBattleRepository implements BattleRepository {
   private readonly url: string;
 
@@ -63,6 +64,7 @@ export class SupabaseBattleRepository implements BattleRepository {
     if (state.battleId !== battleId) {
       throw new Error("state battleId cannot change during save");
     }
+    // 数据库函数在同一条 UPDATE 中比较并递增版本，避免读取后再写入造成覆盖。
     const savedVersion = await this.rpc<number | null>("ly_battle_save", {
       p_battle_id: battleId,
       p_expected_version: expectedVersion,

@@ -4,6 +4,7 @@ export {
   type BattleResponse,
   type ControllerOptions,
   type RuleErrorCode,
+  type SubmitActionInput,
 } from "./controller.ts";
 export {
   BattleAlreadyExistsError,

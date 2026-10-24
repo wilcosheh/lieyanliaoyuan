@@ -1,3 +1,4 @@
+-- 每个 battle_id 只保存一份权威快照，所有服务实例共享该记录。
 create table if not exists ly_battle (
   battle_id text primary key,
   version bigint not null default 1 check (version > 0),
@@ -24,6 +25,7 @@ begin
 end;
 $$;
 
+-- 只有调用方读取的版本仍是当前版本时才允许写入，并原子返回新版本号。
 create or replace function ly_battle_save(
   p_battle_id text,
   p_expected_version bigint,
@@ -46,6 +48,7 @@ begin
 end;
 $$;
 
+-- 对局快照只允许服务端身份访问，客户端不能绕过规则层直接修改。
 alter table ly_battle enable row level security;
 revoke all on ly_battle from public, anon, authenticated;
 grant all on ly_battle to service_role;

@@ -28,6 +28,7 @@ export type StatusEffectState = {
   stacks: number;
   sourcePlayerId: string;
   sourceSkillId: string;
+  sourcePerfection: number;
   appliedRound: number;
   dispellable: boolean;
 };
@@ -53,6 +54,7 @@ export type RoundState = {
   winnerPlayerId: string | null;
   commandId: string | null;
   skillId: string | null;
+  perfection: number;
 };
 
 export type BattleEvent = {
@@ -91,8 +93,8 @@ export type InitialPlayer = {
 };
 
 /**
- * Owns all mutable battle state. Methods intentionally perform no rule checks;
- * the controller decides whether each mutation is legal.
+ * 持有单场对局的全部可变状态。
+ * 本层只负责状态读写，不判断操作是否合法；所有规则校验都由控制层完成。
  */
 export class BattleStateMachine {
   private state: BattleState;
@@ -137,6 +139,19 @@ export class BattleStateMachine {
   static restore(snapshot: BattleState): BattleStateMachine {
     return new BattleStateMachine({
       ...snapshot,
+      players: snapshot.players.map((player) => ({
+        ...player,
+        statusEffects: player.statusEffects.map((effect) => ({
+          ...effect,
+          sourcePerfection: effect.sourcePerfection ?? 100,
+        })),
+      })),
+      currentRound: snapshot.currentRound
+        ? {
+          ...snapshot.currentRound,
+          perfection: snapshot.currentRound.perfection ?? 100,
+        }
+        : null,
       processedCommands: snapshot.processedCommands ?? {},
     });
   }

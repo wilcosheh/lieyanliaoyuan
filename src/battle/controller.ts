@@ -26,6 +26,7 @@ export type RuleErrorCode =
   | "ROUND_ALREADY_WON"
   | "ACTOR_DEAD"
   | "ACTION_DISABLED"
+  | "INVALID_PERFECTION"
   | "ASR_FAILED"
   | "SKILL_NOT_FOUND"
   | "SKILL_EXHAUSTED"
@@ -59,10 +60,20 @@ export type ControllerOptions = {
   characters?: CharacterConfig[];
 };
 
+export type SubmitActionInput = {
+  playerId: string;
+  commandId: string;
+  roundNo: number;
+  skillText: string;
+  /** 技能完美程度百分比，范围为 0-100；省略时按 100 处理。 */
+  perfection?: number;
+};
+
 type DamageContext = {
   sourcePlayerId: string;
   sourceSkillId: string;
   roundNo: number;
+  perfection: number;
   isDot?: boolean;
 };
 
@@ -104,7 +115,7 @@ export class BattleController {
     );
   }
 
-  /** Restores a controller from repository-owned state. */
+  /** 从仓库保存的权威快照恢复控制器，恢复后仍只能通过控制器规则修改状态。 */
   static restore(
     snapshot: BattleState,
     options: ControllerOptions = {},
@@ -190,16 +201,15 @@ export class BattleController {
     return this.success(start);
   }
 
-  submitAction(input: {
-    playerId: string;
-    commandId: string;
-    roundNo: number;
-    skillText: string;
-  }): BattleResponse {
+  submitAction(input: SubmitActionInput): BattleResponse {
+    const perfection: unknown = input.perfection === undefined
+      ? 100
+      : input.perfection;
     const signature = JSON.stringify([
       input.playerId,
       input.roundNo,
       input.skillText,
+      String(perfection),
     ]);
     const previous = this.machine.getProcessedCommand(input.commandId);
     if (previous) {
@@ -222,6 +232,16 @@ export class BattleController {
     }
 
     const start = this.startEventIndex();
+    if (
+      typeof perfection !== "number" || !Number.isFinite(perfection) ||
+      perfection < 0 || perfection > 100
+    ) {
+      return this.storeCommand(
+        input.commandId,
+        signature,
+        this.reject(start, "INVALID_PERFECTION", input.playerId),
+      );
+    }
     if (this.state.status !== "RUNNING") {
       return this.storeCommand(
         input.commandId,
@@ -299,16 +319,18 @@ export class BattleController {
       );
     }
 
-    // This controller is the only place that can claim a round winner.
+    // 只有控制层可以锁定本回合行动者，外部请求不能直接指定回合胜者。
     this.machine.setCurrentRound({
       ...round,
       status: "SETTLING",
       winnerPlayerId: input.playerId,
       commandId: input.commandId,
       skillId: skill.id,
+      perfection,
     });
     this.emit("ACTION_ACCEPTED", input.playerId, null, skill.id, {
       roundNo: round.roundNo,
+      perfection,
     });
     this.machine.incrementSkillUse(
       input.playerId,
@@ -346,7 +368,12 @@ export class BattleController {
         )
         : undefined;
       if (!actor || !skill) return this.reject(start, "SKILL_NOT_FOUND");
-      this.resolveBattlePhase(actor.playerId, skill, round.roundNo);
+      this.resolveBattlePhase(
+        actor.playerId,
+        skill,
+        round.roundNo,
+        round.perfection ?? 100,
+      );
       return this.success(start);
     }
     if (round.status === "ENDING") {
@@ -370,12 +397,20 @@ export class BattleController {
     playerId: string,
     skill: SkillConfig,
     roundNo: number,
+    perfection: number,
   ): void {
     const target = this.machine.getOpponent(playerId);
     if (!target) return;
     const before = this.combatSnapshot();
-    this.applySkillEffects(playerId, target.playerId, skill, roundNo);
+    this.applySkillEffects(
+      playerId,
+      target.playerId,
+      skill,
+      roundNo,
+      perfection,
+    );
     this.emit("BATTLE_RESULT", playerId, target.playerId, skill.id, {
+      perfection,
       before,
       after: this.combatSnapshot(),
     });
@@ -427,6 +462,7 @@ export class BattleController {
       winnerPlayerId: null,
       commandId: null,
       skillId: null,
+      perfection: 100,
     });
     this.refreshActionStates(roundNo);
     this.emit("ROUND_STARTED", null, null, null, { roundNo });
@@ -450,12 +486,14 @@ export class BattleController {
     targetId: string,
     skill: SkillConfig,
     roundNo: number,
+    perfection: number,
   ): void {
     skill.effects.forEach((effect, index) => {
       const context: DamageContext = {
         sourcePlayerId: actorId,
         sourceSkillId: skill.id,
         roundNo,
+        perfection,
       };
       switch (effect.type) {
         case "DAMAGE":
@@ -566,6 +604,7 @@ export class BattleController {
       stacks: 1,
       sourcePlayerId: context.sourcePlayerId,
       sourceSkillId: context.sourceSkillId,
+      sourcePerfection: context.perfection,
       appliedRound: context.roundNo,
       dispellable: effect.type === "ACTION_RESTRICTION"
         ? true
@@ -612,10 +651,11 @@ export class BattleController {
           continue;
         }
         if (status.kind === "DOT") {
-          this.applyDamage(player.playerId, status.value, {
+          const amount = this.applyDamage(player.playerId, status.value, {
             sourcePlayerId: status.sourcePlayerId,
             sourceSkillId: status.sourceSkillId,
             roundNo,
+            perfection: status.sourcePerfection ?? 100,
             isDot: true,
           });
           this.consumeTriggers(status.sourcePlayerId, ["DOT_BOOST"]);
@@ -627,7 +667,9 @@ export class BattleController {
             {
               statusId: status.id,
               tag: status.tag,
-              value: status.value,
+              rawValue: status.value,
+              perfection: status.sourcePerfection ?? 100,
+              value: amount,
             },
           );
         } else if (status.kind === "BUFF" && status.tag === "HEAL_OVER_TIME") {
@@ -709,10 +751,11 @@ export class BattleController {
     const sourcePenalty = this.statusValue(source, "DAMAGE_DEALT_DOWN");
     const targetReduction = this.statusValue(target, "DAMAGE_REDUCTION");
     const targetTakenUp = this.statusValue(target, "DAMAGE_TAKEN_UP");
+    const perfection = Math.min(100, Math.max(0, context.perfection));
     const amount = Math.max(
       0,
       Math.round(
-        rawAmount * (1 + sourceBoost / 100) *
+        rawAmount * (perfection / 100) * (1 + sourceBoost / 100) *
           (1 - sourcePenalty / 100) *
           (1 - targetReduction / 100) * (1 + targetTakenUp / 100),
       ),
@@ -732,6 +775,7 @@ export class BattleController {
       context.sourceSkillId,
       {
         rawAmount,
+        perfection,
         amount,
         absorbed,
         hpDamage,

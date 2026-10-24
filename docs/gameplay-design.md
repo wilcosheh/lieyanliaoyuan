@@ -71,32 +71,40 @@
 5. 服务器检查双方是否带有“本回合不可行动”的状态；被石化、麻痹或冻结的一方标记为本回合跳过行动，但不影响另一方出招。若双方都被限制行动，则直接进入回合结束阶段。
 6. 客户端等待可行动玩家喊出技能名称；客户端系统完成语音转文字后提交回合指令。
 
-客户端提交的数据只包括身份、回合、`command_id`
-和转写文字。客户端不能提交伤害、治疗、护盾、技能次数、命中结果或胜负结果。
+客户端提交的数据只包括身份、回合、`command_id`、转写文字和可选的技能完美程度
+`perfection`。客户端不能提交伤害、治疗、护盾、技能次数或胜负结果。
+
+`perfection` 使用百分比数值，合法范围为 `0-100`，允许小数，省略时按 `100`
+处理。该参数表示客户端语音识别系统给出的本次技能完成质量，只影响技能造成的直接伤害和
+DOT
+基础伤害，不直接决定技能名称是否正确，也不影响治疗、护盾、Buff、Debuff、破盾、驱散和行动限制的数值或持续时间。
 
 #### 行动有效性校验
 
 服务器收到请求后立即处理，不做防抖、不等待对手请求，也不等待固定的同时结算窗口。校验顺序如下：
 
 1. 检查 `command_id` 是否已处理；已处理则返回原处理结果，防止网络重试重复结算。
-2. 检查 `battle_id`、`round_no` 和玩家身份是否属于当前对局和当前回合。
-3. 检查当前回合是否仍为 `WAITING_COMMAND`；对方已经成功行动时返回
+2. 检查 `perfection` 是否为 `0-100` 范围内的有限数值；非法时返回
+   `INVALID_PERFECTION`。
+3. 检查 `battle_id`、`round_no` 和玩家身份是否属于当前对局和当前回合。
+4. 检查当前回合是否仍为 `WAITING_COMMAND`；对方已经成功行动时返回
    `ROUND_ALREADY_WON`。
-4. 检查行动者角色是否存活；死亡角色不能行动。
-5. 检查行动者是否带有本回合行动限制；若处于石化、麻痹或冻结状态，返回
+5. 检查行动者角色是否存活；死亡角色不能行动。
+6. 检查行动者是否带有本回合行动限制；若处于石化、麻痹或冻结状态，返回
    `ACTION_DISABLED`，不占用行动权。
-6. 将转写文字与行动者角色的标准技能名称精确匹配；匹配失败返回 `ASR_FAILED`。
-7. 检查技能是否满足使用规则：普通技能是否已用过、基础技能是否在上一回合使用过、特殊技能是否达到次数或间隔限制。
-8. 通过数据库行锁、乐观锁版本号或房间单线程事件循环，原子写入 `round_winner_id`
-   并将状态改为 `SETTLING`。
+7. 将转写文字与行动者角色的标准技能名称精确匹配；匹配失败返回 `ASR_FAILED`。
+8. 检查技能是否满足使用规则：普通技能是否已用过、基础技能是否在上一回合使用过、特殊技能是否达到次数或间隔限制。
+9. 通过数据库行锁、乐观锁版本号或房间单线程事件循环，原子写入
+   `round_winner_id`、标准化后的 `perfection`，并将状态改为 `SETTLING`。
 
-只有第 7
-步成功的请求才算本回合有效行动。无效请求不会消耗技能次数、不会产生效果，也不会阻止之后的有效请求。
+只有全部校验通过且第 9
+步成功写入行动权的请求才算本回合有效行动。无效请求不会消耗技能次数、不会产生效果，也不会阻止之后的有效请求。
 
 #### 校验结果
 
 | 校验情况                       | 返回结果                     | 回合处理                       |
 | ------------------------------ | ---------------------------- | ------------------------------ |
+| 完美程度不是有限数值或超出范围 | `INVALID_PERFECTION`         | 继续等待                       |
 | 技能文字不是标准技能名称       | `ASR_FAILED`                 | 继续等待                       |
 | 普通技能已经使用过             | `SKILL_EXHAUSTED`            | 继续等待                       |
 | 基础技能上一回合使用过         | `BASIC_CONSECUTIVE_REJECTED` | 继续等待                       |
@@ -135,7 +143,8 @@
 
 #### 执行动作
 
-服务器使用服务端配置中的 `skill_id`、`effect_version` 和行动者当前状态计算行动：
+服务器使用服务端配置中的 `skill_id`、`effect_version`、本回合保存的 `perfection`
+和行动者当前状态计算行动：
 
 1. 确定技能目标和技能效果参数。
 2. 根据行动者的 Buff、生命、护盾和其他状态计算最终效果。
@@ -143,7 +152,26 @@
 4. 将生命值、护盾和状态限制在服务器定义的边界内。
 5. 记录技能使用次数和最近使用回合。
 
-示例：行动者使用攻击技能时，服务器根据技能基础伤害、行动者增益和目标护盾计算实际扣除的护盾与生命；客户端只接收最终结果，不参与计算。
+伤害按以下顺序计算：
+
+```text
+最终伤害 = 四舍五入(
+  技能基础伤害
+  × perfection / 100
+  × 行动者伤害增益
+  × 行动者伤害降低
+  × 目标伤害减免
+  × 目标受到伤害提高
+)
+```
+
+最终伤害最低为 `0`，然后先扣除目标护盾，再扣除目标生命。示例：基础伤害为
+`65`、没有其他增减益、`perfection = 90` 时，最终伤害为 `round(65 × 0.9) = 59`。
+
+DOT 保存施加它的行动所使用的 `perfection`，之后每次 DOT
+结算都继续使用该值；后续回合不能通过提交新的完美程度修改已有 DOT。技能包含多段
+`DAMAGE`
+时，每段分别按相同完美程度计算。治疗、护盾、Buff、Debuff、破盾、驱散和行动限制不乘以完美程度。
 
 #### 结果通知
 
@@ -529,7 +557,9 @@ StatusEffect
 }
 ```
 
-客户端只能提交标准技能名称对应的转写文字。伤害、治疗、护盾、持续时间、触发次数、驱散范围和行动限制都必须由服务器配置决定。
+客户端只能提交标准技能名称对应的转写文字和本次技能的
+`perfection`。基础伤害、治疗、护盾、持续时间、触发次数、驱散范围和行动限制都必须由服务器配置决定；`perfection`
+只能作为伤害公式中的 `0-100%` 系数，不能直接覆盖任何效果数值。
 
 技能使用规则固定为三类：
 
@@ -672,6 +702,7 @@ DOT、破除护盾和一回合行动限制制造节奏优势。
 
 - 麦克风采集
 - 语音活动检测
+- 从语音识别系统取得并提交 `0-100` 的技能完美程度
 - 展示候选技能和识别进度
 - 播放技能动画和音效
 - 展示服务器下发的战斗结果
@@ -709,6 +740,7 @@ Battle
 - round_started_at
 - round_status (`WAITING_COMMAND` / `SETTLING` / `ENDING` / `FINISHED`)
 - round_winner_id
+- perfection（本回合获胜行动的技能完美程度，默认 100）
 - settlement_sequence
 
 PlayerBattleState
@@ -730,6 +762,7 @@ RoundCommand
 - player_id
 - skill_id
 - transcribed_text
+- perfection
 - received_at
 - state
 - reject_reason
@@ -757,7 +790,11 @@ acceptRoundCommand(command):
     round = loadRound(command.battle_id, command.round_no)
     state = loadPlayerState(command.player_id)
     skill = matchSkillByExactText(state.character_id, command.transcribed_text)
+    perfection = command.perfection ?? 100
 
+    if !isFinite(perfection) or perfection < 0 or perfection > 100:
+        reject(command, INVALID_PERFECTION)
+        return
     if !round.isWaitingCommand():
         reject(command, ROUND_ALREADY_WON)
         return
@@ -780,6 +817,7 @@ acceptRoundCommand(command):
             reject(command, ROUND_ALREADY_WON)
             return
         round.round_winner_id = command.player_id
+        round.perfection = perfection
         round.round_status = SETTLING
         save(round, command)
 
@@ -799,7 +837,12 @@ advanceBattlePhase(battle_id):
 settleRoundWinner(round):
     snapshot = loadBattleSnapshot(round.battle_id)
     skill = loadAcceptedSkill(round.skill_id)
-    battleResult = calculateSkill(snapshot, round.round_winner_id, skill)
+    battleResult = calculateSkill(
+        snapshot,
+        round.round_winner_id,
+        skill,
+        round.perfection
+    )
     applyResult(snapshot, battleResult)
     persistSnapshotAndEvents(snapshot, BATTLE_RESULT)
 
@@ -880,6 +923,12 @@ HTTP 请求的到达顺序不能直接作为数据库写入顺序，必须经过
 20. 在不同网络延迟下，结果以服务器收到有效请求的先后为准，服务器不增加防抖等待。
 21. 技能名称存在同音字、同音词或同音别名时，内容审核和配置校验必须拒绝发布。
 22. 客户端提交自定义快捷词时，服务器必须拒绝并按标准技能名称匹配。
+23. 省略 `perfection` 时必须与提交 `100` 得到相同结果；超出 `0-100`
+    或不是有限数值时返回 `INVALID_PERFECTION`，且不消耗技能或回合。
+24. `perfection` 只缩放直接伤害和 DOT
+    伤害；复合技能中的治疗、护盾、增减益、破盾、驱散和行动限制保持配置值。
+25. 同一个 `command_id` 省略 `perfection` 与显式提交 `100`
+    视为同一命令；改用其他完美程度重放必须返回 `COMMAND_ALREADY_PROCESSED`。
 
 ## 12. 首版已确定约束
 
