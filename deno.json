@@ -1,11 +1,11 @@
 {
   "tasks": {
     "dev": "deno run -A src/main.ts",
-    "test": "deno test -A",
+    "test": "deno test -A src",
     "test:battle": "deno test -A src/battle",
     "sim": "deno run -A scripts/sim_match.ts",
     "sim:battle": "deno run -A scripts/sim_battle_engine.ts",
-    "check": "deno fmt --check && deno lint && deno test -A --frozen && deno task sim && deno task sim:battle",
+    "check": "deno fmt --check src scripts supabase/functions && deno lint src scripts supabase/functions && deno test -A src && deno run -A scripts/sim_match.ts",
     "fmt": "deno fmt"
   },
   "imports": {

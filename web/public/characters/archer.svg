@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" role="img" aria-label="风行弓手">
+  <rect width="360" height="420" fill="#27876c"/><path d="M0 350L360 70v350H0z" fill="#145e55" opacity=".55"/>
+  <circle cx="177" cy="108" r="46" fill="#e8b78d"/><path d="M128 112c-8-73 104-78 101-9l-32-41-49 20z" fill="#2d3029"/><path d="M215 76l47 45-40 3z" fill="#2d3029"/>
+  <path d="M76 218c30-75 177-82 211 8l25 194H46z" fill="#263d36"/><path d="M120 185l57 61 61-61 34 52-43 183H125L87 236z" fill="#20745e"/>
+  <path d="M305 35C188 125 179 307 300 394" fill="none" stroke="#e7d49a" stroke-width="9"/><path d="M302 38L105 325" stroke="#342f29" stroke-width="5"/><path d="M96 310l28 4-20 18z" fill="#efc346"/>
+  <path d="M148 112h12m29 0h12" stroke="#26302a" stroke-width="6"/><path d="M163 138h24" stroke="#885744" stroke-width="5"/>
+</svg>

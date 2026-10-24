@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" role="img" aria-label="烈焰剑士">
+  <rect width="360" height="420" fill="#c83f2a"/><path d="M0 340L360 118v302H0z" fill="#8f281e" opacity=".55"/>
+  <circle cx="190" cy="108" r="48" fill="#f4c39d"/><path d="M139 97c8-60 96-71 112-10l-39-22-18 27-27-18z" fill="#24231f"/>
+  <path d="M111 205c38-75 132-73 166 5l23 162H72z" fill="#2c2b27"/><path d="M151 177l39 46 44-49 23 39-65 96-69-93z" fill="#f05a3c"/>
+  <path d="M54 362L298 38l19 14L83 384z" fill="#f4d15f"/><path d="M279 65l39-46 20 15-29 52z" fill="#f8f1d4"/><path d="M64 341l-31 54 58-16z" fill="#24231f"/>
+  <path d="M166 111h12m30 0h12" stroke="#24231f" stroke-width="6" stroke-linecap="square"/><path d="M178 137h30" stroke="#9d3c32" stroke-width="5"/>
+</svg>

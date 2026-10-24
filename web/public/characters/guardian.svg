@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" role="img" aria-label="圣光守卫">
+  <rect width="360" height="420" fill="#d9aa38"/><path d="M0 85l360 190v145H0z" fill="#f0d985" opacity=".5"/>
+  <circle cx="180" cy="104" r="47" fill="#e8bb8f"/><path d="M132 106c-2-68 100-72 98-5l-32-28-44 24z" fill="#54554e"/>
+  <path d="M82 228c24-79 171-85 200 0l25 192H48z" fill="#f1efe5"/><path d="M130 182l50 65 53-66 36 49-44 117h-89L91 229z" fill="#b8932e"/>
+  <path d="M238 190l87 35-9 137-78 44-77-44-8-137z" fill="#f4e6a5" stroke="#4a4b46" stroke-width="9"/><path d="M239 226v133m-52-67h104" stroke="#b78d22" stroke-width="13"/>
+  <path d="M153 110h12m29 0h12" stroke="#343530" stroke-width="6"/><path d="M168 137h24" stroke="#875d3e" stroke-width="5"/>
+</svg>

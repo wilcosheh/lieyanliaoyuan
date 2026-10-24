@@ -1,0 +1,1038 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #171814;
+  --paper: #eee9dc;
+  --paper-deep: #d8d0bd;
+  --line: #9b927f;
+  --ember: #e24a2a;
+  --gold: #e8b647;
+  --jade: #17816d;
+  --violet: #7152a1;
+  --danger: #b72929;
+  --white: #fffdf7;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  min-height: 100%;
+}
+body {
+  margin: 0;
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image: linear-gradient(rgba(23, 24, 20, .035) 1px, transparent
+    1px), linear-gradient(90deg, rgba(23, 24, 20, .025) 1px, transparent 1px);
+  background-size: 32px 32px;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+}
+button,
+input {
+  font: inherit;
+  letter-spacing: 0;
+}
+button {
+  color: inherit;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: var(--ember);
+}
+.primary-button,
+.quiet-button {
+  min-height: 48px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 800;
+}
+.primary-button {
+  color: var(--white);
+  background: var(--ink);
+  box-shadow: 4px 4px 0 var(--ember);
+}
+.primary-button:hover:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 3px 3px 0 var(--ember);
+}
+.primary-button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.quiet-button {
+  background: transparent;
+}
+.quiet-button:hover {
+  background: rgba(23, 24, 20, .06);
+}
+.primary-button svg,
+.quiet-button svg {
+  width: 18px;
+  height: 18px;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  background: #2daa70;
+  display: inline-block;
+  box-shadow: 0 0 0 4px rgba(45, 170, 112, .14);
+}
+.error-banner {
+  border-left: 4px solid var(--danger);
+  padding: 12px;
+  color: var(--danger);
+  background: rgba(183, 41, 41, .08);
+}
+
+.entry-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(360px, 1.15fr) minmax(360px, .85fr);
+}
+.brand-panel {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: clamp(40px, 7vw, 100px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: var(--white);
+  background: #20211d;
+  border-right: 8px solid var(--ember);
+}
+.brand-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .2;
+  background-image: linear-gradient(30deg, transparent 48%, #e8b647 49%, #e8b647
+    51%, transparent 52%);
+  background-size: 80px 80px;
+}
+.brand-panel > * {
+  position: relative;
+}
+.brand-mark {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--gold);
+  transform: rotate(45deg);
+  margin-bottom: 44px;
+}
+.brand-mark svg {
+  width: 34px;
+  transform: rotate(-45deg);
+}
+.brand-panel h1 {
+  margin: 0;
+  font-family: Georgia, "STSong", serif;
+  font-size: clamp(64px, 8vw, 124px);
+  line-height: .96;
+  font-weight: 900;
+}
+.brand-line {
+  margin: 26px 0 0;
+  max-width: 430px;
+  color: #c8c4b8;
+  font-size: 19px;
+}
+.duel-emblem {
+  position: absolute;
+  right: 7%;
+  bottom: 7%;
+  width: 86px;
+  height: 86px;
+  border: 1px solid #706c60;
+  display: grid;
+  place-items: center;
+}
+.duel-emblem svg {
+  width: 42px;
+  height: 42px;
+  color: var(--gold);
+}
+.match-panel {
+  min-height: 100vh;
+  padding: clamp(32px, 7vw, 96px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.match-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 48px;
+}
+.match-form {
+  display: grid;
+  gap: 14px;
+}
+.match-form label {
+  font-family: Georgia, "STSong", serif;
+  font-size: 32px;
+  font-weight: 800;
+}
+.match-form input {
+  height: 58px;
+  border: 0;
+  border-bottom: 2px solid var(--ink);
+  background: transparent;
+  font-size: 20px;
+  padding: 0 4px;
+}
+.match-form .primary-button {
+  margin-top: 22px;
+}
+.device-check {
+  margin-top: 38px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  display: flex;
+  gap: 10px;
+  color: #656052;
+  font-size: 13px;
+}
+.device-check svg {
+  width: 16px;
+}
+.searching {
+  text-align: center;
+}
+.searching > p {
+  margin: 28px 0;
+  font-weight: 700;
+}
+.radar {
+  width: 180px;
+  height: 180px;
+  margin: auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.radar::before,
+.radar::after {
+  content: "";
+  position: absolute;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  inset: 25%;
+}
+.radar::after {
+  inset: 44%;
+  background: var(--ember);
+  border: 0;
+  animation: pulse 1.3s infinite;
+}
+.radar span {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--ink);
+}
+.radar span:nth-child(1) {
+  top: 28px;
+  left: 45px;
+}
+.radar span:nth-child(2) {
+  right: 35px;
+  bottom: 48px;
+}
+.radar span:nth-child(3) {
+  left: 27px;
+  bottom: 56px;
+}
+@keyframes pulse {
+  50% {
+    transform: scale(1.35);
+    opacity: .5;
+  }
+}
+
+.prepare-shell {
+  min-height: 100vh;
+  max-width: 1440px;
+  margin: auto;
+  padding: 30px clamp(20px, 4vw, 64px) 110px;
+}
+.stage-header {
+  min-height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--ink);
+  gap: 24px;
+}
+.stage-header h1 {
+  margin: 0;
+  font-family: Georgia, "STSong", serif;
+  font-size: 36px;
+}
+.versus-names {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-weight: 800;
+}
+.versus-names svg {
+  color: var(--ember);
+}
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 28px 0;
+}
+.character-card {
+  min-width: 0;
+  text-align: left;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform .16s, border-color .16s;
+}
+.character-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--ink);
+}
+.character-card.selected {
+  border: 3px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--gold);
+}
+.portrait-wrap {
+  height: min(36vw, 390px);
+  min-height: 260px;
+  position: relative;
+  overflow: hidden;
+  background: var(--accent);
+}
+.portrait-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 12px solid rgba(255,255,255,.13);
+  pointer-events: none;
+}
+.portrait-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.portrait-wrap > span {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  color: white;
+  background: var(--ink);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.character-info {
+  padding: 18px;
+}
+.character-info > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.character-info h2 {
+  margin: 0;
+  font-family: Georgia, "STSong", serif;
+  font-size: 24px;
+}
+.character-info p {
+  min-height: 40px;
+  color: #666052;
+  font-size: 14px;
+}
+.spell-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.spell-preview span {
+  border: 1px solid var(--line);
+  padding: 3px 5px;
+  font-size: 11px;
+  background: rgba(255,255,255,.3);
+}
+.ready-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  min-height: 82px;
+  padding: 14px max(20px, calc((100vw - 1312px) / 2));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(238,233,220,.96);
+  border-top: 1px solid var(--ink);
+  z-index: 10;
+}
+.ready-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: #777063;
+}
+.ready-state > span {
+  width: 10px;
+  height: 10px;
+  border: 1px solid currentColor;
+}
+.ready-state.active {
+  color: var(--jade);
+}
+.ready-state.active > span {
+  background: var(--jade);
+}
+
+.battle-shell {
+  height: 100vh;
+  min-height: 650px;
+  display: grid;
+  grid-template-rows: 58px minmax(300px, 1fr) 260px;
+  overflow: hidden;
+  background: #ded7c8;
+}
+.battle-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--ink);
+  background: var(--paper);
+}
+.battle-topbar > span {
+  font-size: 12px;
+}
+.battle-topbar > span strong {
+  font-size: 24px;
+  margin-left: 6px;
+}
+.round-state {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-weight: 800;
+  font-size: 13px;
+}
+.icon-button {
+  justify-self: end;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  cursor: pointer;
+}
+.icon-button svg {
+  width: 18px;
+}
+.arena {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 28%) 1fr minmax(220px, 28%);
+  overflow: hidden;
+  border-bottom: 1px solid var(--ink);
+}
+.arena::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .12;
+  background-image: repeating-linear-gradient(135deg, transparent 0 25px,
+    var(--ink) 26px 27px);
+}
+.fighter {
+  position: relative;
+  z-index: 2;
+  padding: 22px;
+  background: rgba(238,233,220,.9);
+}
+.fighter.opponent {
+  border-right: 1px solid var(--line);
+}
+.fighter.self {
+  border-left: 1px solid var(--line);
+  align-self: end;
+}
+.fighter-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+.fighter-heading span {
+  font-size: 9px;
+  color: var(--ember);
+  font-weight: 900;
+}
+.fighter-heading h2 {
+  margin: 2px 0 0;
+  font-size: 19px;
+}
+.fighter-heading p {
+  margin: 0;
+  font-size: 12px;
+}
+.vital-row {
+  height: 25px;
+  display: grid;
+  grid-template-columns: 17px 1fr 35px 34px;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.vital-row svg {
+  width: 14px;
+}
+.vital-row strong {
+  text-align: right;
+}
+.vital-row small {
+  color: #766f62;
+}
+.vital-track {
+  height: 7px;
+  background: #bdb5a5;
+  overflow: hidden;
+}
+.vital-track span {
+  display: block;
+  height: 100%;
+  transition: width .3s;
+}
+.vital-row.hp .vital-track span {
+  background: var(--ember);
+}
+.vital-row.shield .vital-track span {
+  background: var(--jade);
+}
+.status-strip {
+  min-height: 26px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 9px;
+}
+.status-strip span {
+  font-size: 9px;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  padding: 3px 5px;
+}
+.status-strip .danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.combat-stage {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 84px 1fr;
+  align-items: end;
+  min-width: 0;
+}
+.fighter-portrait {
+  height: 100%;
+  display: flex;
+  align-items: end;
+  overflow: hidden;
+}
+.fighter-portrait img {
+  width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: bottom;
+  filter: drop-shadow(10px 10px 0 rgba(23,24,20,.16));
+}
+.fighter-portrait.opponent {
+  transform: scaleX(-1);
+  opacity: .9;
+}
+.turn-sigil {
+  align-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--ember);
+  font-size: 9px;
+  font-weight: 900;
+}
+.turn-sigil svg {
+  width: 36px;
+  height: 36px;
+}
+.command-deck {
+  display: grid;
+  grid-template-columns: 1fr 190px;
+  background: var(--paper);
+}
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 1px;
+  background: var(--line);
+  border-right: 1px solid var(--line);
+}
+.skill-tile {
+  min-width: 0;
+  padding: 13px;
+  background: var(--paper);
+}
+.skill-tile > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+}
+.skill-tile strong {
+  font-family: Georgia, "STSong", serif;
+  font-size: 16px;
+}
+.skill-tile p {
+  margin: 9px 0;
+  height: 28px;
+  overflow: hidden;
+  font-size: 10px;
+  color: #645e52;
+}
+.skill-tile small {
+  font-size: 9px;
+  color: #777063;
+}
+.skill-tile.disabled {
+  opacity: .42;
+}
+.tier {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  color: white;
+  font-size: 8px;
+  font-weight: 800;
+  background: var(--jade);
+}
+.tier.medium {
+  background: var(--violet);
+}
+.tier.long {
+  background: var(--ember);
+}
+.voice-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+}
+.voice-control > span {
+  font-size: 12px;
+  font-weight: 800;
+}
+.voice-control small {
+  max-width: 170px;
+  color: var(--danger);
+  text-align: center;
+  font-size: 10px;
+}
+.speech-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 166px;
+  min-height: 30px;
+  border: 1px solid var(--ink);
+  background: var(--paper-deep);
+}
+.speech-mode button {
+  border: 0;
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  background: transparent;
+  cursor: pointer;
+}
+.speech-mode button + button {
+  border-left: 1px solid var(--ink);
+}
+.speech-mode button.active {
+  color: var(--white);
+  background: var(--ink);
+}
+.speech-mode button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+.speech-mode svg {
+  width: 13px;
+  height: 13px;
+}
+.mic-button {
+  width: 90px;
+  height: 90px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: var(--ember);
+  box-shadow: 0 0 0 7px var(--paper), 0 0 0 9px var(--ink);
+  cursor: pointer;
+  touch-action: none;
+}
+.mic-button svg {
+  width: 34px;
+  height: 34px;
+}
+.mic-button.recording {
+  animation: record 1s infinite;
+  background: var(--danger);
+}
+.mic-button:disabled {
+  background: #8a8478;
+  cursor: not-allowed;
+}
+@keyframes record {
+  50% {
+    box-shadow: 0 0 0 7px var(--paper), 0 0 0 14px rgba(183,41,41,.45);
+  }
+}
+.battle-log {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  width: min(380px, 92vw);
+  height: 100vh;
+  background: var(--paper);
+  border-left: 1px solid var(--ink);
+  padding: 18px;
+  overflow: auto;
+  box-shadow: -12px 0 30px rgba(23,24,20,.2);
+}
+.battle-log header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--ink);
+}
+.battle-log h2 {
+  font-family: Georgia, serif;
+}
+.battle-log > div {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+.battle-log > div span {
+  color: var(--ember);
+  font-size: 11px;
+}
+.battle-log p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.result-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+  background: #20211d;
+  color: var(--white);
+}
+.result-character {
+  min-height: 100vh;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  background: var(--ember);
+  overflow: hidden;
+}
+.result-shell.defeat .result-character {
+  background: #60615b;
+}
+.result-character img {
+  width: min(85%, 560px);
+  height: auto;
+  filter: drop-shadow(16px 16px 0 rgba(23,24,20,.22));
+}
+.result-shell > section {
+  padding: clamp(40px, 8vw, 110px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.result-shell h1 {
+  margin: 0;
+  font-family: Georgia, "STSong", serif;
+  font-size: clamp(84px, 11vw, 160px);
+  line-height: 1;
+}
+.result-shell section > p:not(.eyebrow) {
+  color: #c8c4b8;
+}
+.result-stats {
+  margin: 36px 0;
+  border-top: 1px solid #636258;
+  border-bottom: 1px solid #636258;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.result-stats > div {
+  padding: 18px 10px;
+  display: grid;
+  gap: 4px;
+  border-right: 1px solid #636258;
+}
+.result-stats > div:last-child {
+  border: 0;
+}
+.result-stats svg {
+  color: var(--gold);
+  width: 18px;
+}
+.result-stats span {
+  color: #aaa697;
+  font-size: 10px;
+}
+.result-stats strong {
+  font-size: 22px;
+}
+.result-shell .primary-button {
+  background: var(--gold);
+  color: var(--ink);
+  box-shadow: 4px 4px 0 var(--ember);
+}
+.loading-screen {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+}
+.loading-screen svg {
+  color: var(--ember);
+  width: 48px;
+  height: 48px;
+}
+.loading-screen p {
+  font-weight: 800;
+}
+
+@media (max-width: 980px) {
+  .character-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .portrait-wrap {
+    height: 400px;
+  }
+  .battle-shell {
+    height: auto;
+    min-height: 100vh;
+    grid-template-rows: 58px auto auto;
+    overflow: visible;
+  }
+  .arena {
+    grid-template-columns: 1fr 1fr;
+  }
+  .combat-stage {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    height: 330px;
+  }
+  .fighter.opponent {
+    grid-row: 2;
+  }
+  .fighter.self {
+    grid-row: 2;
+  }
+  .command-deck {
+    grid-template-columns: 1fr;
+  }
+  .skills-grid {
+    grid-template-columns: repeat(2, 1fr);
+    border-right: 0;
+  }
+  .voice-control {
+    min-height: 150px;
+  }
+}
+@media (max-width: 700px) {
+  .entry-shell {
+    grid-template-columns: 1fr;
+  }
+  .brand-panel {
+    min-height: 46vh;
+    padding: 34px 24px;
+    border-right: 0;
+    border-bottom: 6px solid var(--ember);
+  }
+  .brand-mark {
+    margin-bottom: 20px;
+    width: 44px;
+    height: 44px;
+  }
+  .brand-panel h1 {
+    font-size: 56px;
+  }
+  .brand-line {
+    font-size: 15px;
+  }
+  .duel-emblem {
+    display: none;
+  }
+  .match-panel {
+    min-height: 54vh;
+    padding: 32px 24px;
+  }
+  .match-copy {
+    margin-bottom: 26px;
+  }
+  .prepare-shell {
+    padding: 18px 14px 110px;
+  }
+  .stage-header {
+    align-items: start;
+    flex-direction: column;
+    padding-bottom: 18px;
+  }
+  .stage-header h1 {
+    font-size: 28px;
+  }
+  .versus-names {
+    width: 100%;
+    justify-content: space-between;
+    font-size: 12px;
+  }
+  .character-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .portrait-wrap {
+    min-height: 190px;
+    height: 52vw;
+  }
+  .character-info {
+    padding: 12px;
+  }
+  .character-info h2 {
+    font-size: 18px;
+  }
+  .character-info p {
+    font-size: 11px;
+  }
+  .spell-preview {
+    display: none;
+  }
+  .ready-bar {
+    padding: 12px 16px;
+  }
+  .ready-state {
+    font-size: 11px;
+  }
+  .battle-topbar {
+    padding: 0 12px;
+  }
+  .arena {
+    grid-template-columns: 1fr;
+  }
+  .combat-stage {
+    height: 280px;
+  }
+  .fighter.opponent,
+  .fighter.self {
+    grid-row: auto;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .fighter {
+    padding: 13px;
+  }
+  .skills-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .skill-tile:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .skill-tile {
+    padding: 10px;
+  }
+  .skill-tile strong {
+    font-size: 14px;
+  }
+  .command-deck {
+    position: relative;
+  }
+  .voice-control {
+    position: static;
+    order: -1;
+    min-height: 132px;
+    background: rgba(238,233,220,.96);
+    border-bottom: 1px solid var(--ink);
+  }
+  .mic-button {
+    width: 72px;
+    height: 72px;
+  }
+  .result-shell {
+    grid-template-columns: 1fr;
+  }
+  .result-character {
+    min-height: 42vh;
+  }
+  .result-character img {
+    max-height: 42vh;
+    width: auto;
+  }
+  .result-shell > section {
+    padding: 34px 24px;
+  }
+  .result-shell h1 {
+    font-size: 76px;
+  }
+}
