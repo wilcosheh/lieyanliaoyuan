@@ -1,11 +1,10 @@
-# PR 合并进 main（push main）后：先跑测试，再部署到 Supabase。
+# 合并进 main 后：复用 ci 检查，再部署 Supabase。
 #
-# 仓库 Secrets（Settings → Secrets and variables → Actions）：
-#   SUPABASE_ACCESS_TOKEN  — https://supabase.com/dashboard/account/tokens
-#   SUPABASE_PROJECT_REF   — 项目 ref，例如 acqvpmrtdxtwsfendxrd
-#   SUPABASE_DB_PASSWORD   — 项目数据库密码（db push 用）
-# 可选：
-#   LINX_API_KEY / LINX_API_BASE — 有则写入 Edge secrets（对方原声）
+# 仓库 Secrets：
+#   SUPABASE_ACCESS_TOKEN
+#   SUPABASE_PROJECT_REF
+#   SUPABASE_DB_PASSWORD
+# 可选：LINX_API_KEY、LINX_API_BASE
 name: deploy
 
 on:
@@ -17,22 +16,17 @@ concurrency:
   group: deploy-supabase-main
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - run: deno fmt --check
-      - run: deno lint
-      - run: deno test -A
-      - run: deno run -A scripts/sim_match.ts
+  check:
+    uses: ./.github/workflows/ci.yml
 
   deploy:
-    needs: test
+    needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
