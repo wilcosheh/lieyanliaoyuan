@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import type { EngineSnapshot } from "../../engine/service/game.ts";
-import { absorbPeer } from "./room_sync.ts";
+import { absorbPeer, textNeedsRoomLock } from "./room_sync.ts";
 
 Deno.test("absorbPeer keeps the host room visible to a guest snapshot", () => {
   const host: EngineSnapshot = {
@@ -106,4 +106,13 @@ Deno.test("absorbPeer keeps the earlier disconnect deadline", () => {
   const merged = absorbPeer(base, "host", peer);
   assertEquals(merged.metas[0]?.[1].disconnectDeadline, 5_000);
   assertEquals(merged.metas[0]?.[1].disconnectedPlayerId, "p:host");
+});
+
+Deno.test("practice and versus cpu do not take the room lock up front", () => {
+  assertEquals(textNeedsRoomLock("练习"), false);
+  assertEquals(textNeedsRoomLock("人机对战"), false);
+  assertEquals(textNeedsRoomLock("圣光守卫"), false);
+  assertEquals(textNeedsRoomLock("开房间"), true);
+  assertEquals(textNeedsRoomLock("6993"), true);
+  assertEquals(textNeedsRoomLock("加入房间，房间号6993"), true);
 });

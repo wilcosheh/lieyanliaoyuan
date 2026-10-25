@@ -317,7 +317,7 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
   assertEquals(blood.text.includes("中了"), false);
   assertEquals(blood.text.includes("935"), true);
   const pushed = await say(5, "cpu", "wait_event", { device_id: "cpu" });
-  assertEquals(pushed.text.includes("中了破风斩。"), true);
+  assertEquals(pushed.text.includes("中了疾风剑。"), true);
   now.value += 12_000;
   const lost = await say(6, "cpu-2", "submit_utterance", {
     device_id: "cpu",
@@ -391,9 +391,9 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
   await roomSay(7, "guest", "begin_cast", { device_id: "guest" });
   const slash = await roomSay(8, "host", "submit_utterance", {
     device_id: "host",
-    text: "破风斩",
+    text: "疾风剑",
   });
-  assertEquals(slash.includes("破风斩命中。"), true);
+  assertEquals(slash.includes("疾风剑命中。"), true);
   assertEquals(slash.includes("你1000血。"), true);
   assertEquals(slash.includes("对手935血。"), true);
   const interrupted = await roomSay(9, "guest", "submit_utterance", {
@@ -401,7 +401,7 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
     text: "守阵重击",
   });
   assertEquals(interrupted.includes("吟唱被打断。"), true);
-  assertEquals(interrupted.includes("中了破风斩。"), true);
+  assertEquals(interrupted.includes("中了疾风剑。"), true);
   assertEquals(interrupted.includes("你935血。"), true);
   const conceded = await roomSay(10, "host", "submit_utterance", {
     device_id: "host",

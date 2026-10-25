@@ -44,7 +44,25 @@ export class WebBattleApplication {
   ) {}
 
   async joinMatch(playerId: string, nickname: string) {
-    const result = await this.lobby.joinMatch(playerId, nickname);
+    let result = await this.lobby.joinMatch(playerId, nickname);
+    // 玩家结束上一局后再次进入大厅时，旧 MATCHED 票据仍然存在。
+    // 只有确认对应对局已经结束，才释放旧票据并重新进入匹配队列。
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const battleId = result.ticket.battleId;
+      if (result.ticket.status !== "MATCHED" || !battleId) break;
+      const battle = await this.battles.getBattle(battleId);
+      if (
+        !battle.ok ||
+        (battle.state.status !== "FINISHED" &&
+          battle.state.status !== "ARCHIVED")
+      ) break;
+      const released = await this.lobby.releaseMatchTicket(
+        result.ticket.id,
+        playerId,
+      );
+      if (!released) break;
+      result = await this.lobby.joinMatch(playerId, nickname);
+    }
     if (result.ticket.battleId && result.matchedPlayerIds) {
       const created = await this.battles.createBattle({
         battleId: result.ticket.battleId,

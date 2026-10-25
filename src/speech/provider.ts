@@ -39,7 +39,7 @@ export class FakeSpeechProvider implements SpeechProvider {
 
   constructor(
     private readonly result: SpeechRecognitionResult = {
-      transcript: "破风斩",
+      transcript: "疾风剑",
       perfection: 100,
       confidenceSource: "fallback",
     },

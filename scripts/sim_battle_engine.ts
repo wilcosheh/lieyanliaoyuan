@@ -82,11 +82,11 @@ const plannedActions = [
   ["player-b", "裂风短矢"],
   ["player-a", "裂甲连环斩"],
   ["player-b", "毒雨连射阵"],
-  ["player-a", "破风斩"],
+  ["player-a", "疾风剑"],
   ["player-b", "疾风箭"],
-  ["player-a", "破风斩"],
+  ["player-a", "疾风剑"],
   ["player-b", "疾风箭"],
-  ["player-a", "破风斩"],
+  ["player-a", "疾风剑"],
 ] as const;
 
 console.log("对局开始：player-a 烈焰剑士 vs player-b 风行弓手");

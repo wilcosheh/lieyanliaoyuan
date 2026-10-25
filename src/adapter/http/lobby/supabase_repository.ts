@@ -77,6 +77,26 @@ export class SupabaseWebLobbyRepository implements WebLobbyRepository {
     return rows.length === 1;
   }
 
+  async releaseMatchTicket(
+    ticketId: string,
+    playerId: string,
+  ): Promise<boolean> {
+    const rows = await this.rest<MatchRow[]>(
+      `web_match_ticket?ticket_id=eq.${
+        encodeURIComponent(ticketId)
+      }&player_id=eq.${encodeURIComponent(playerId)}&status=eq.MATCHED`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          status: "CANCELLED",
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    );
+    return rows.length === 1;
+  }
+
   async isBattleMember(battleId: string, playerId: string): Promise<boolean> {
     const rows = await this.rest<Array<{ battle_id: string }>>(
       `web_battle_member?battle_id=eq.${
