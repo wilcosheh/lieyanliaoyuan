@@ -1,10 +1,19 @@
 # 烈焰燎原
 
+[![ci](https://github.com/wilcosheh/lieyanliaoyuan/actions/workflows/ci.yml/badge.svg)](https://github.com/wilcosheh/lieyanliaoyuan/actions/workflows/ci.yml)
+
 双方同时念咒语的对战游戏。谁先把当前角色的一句技能完整送到服务器，谁的技能结算，并打断对方还没念完的那一招。念得越准，直接伤害越高。生命、护盾、状态和胜负由服务器裁决。主持只播报已经结算的结果。
 
 Web 是完整体验：学习技能、对电脑、玩家联机。灵矽是第一个智能硬件终端，规则与 Web
 相同，并支持一台设备上的同机双人，用角色声音把整局念出来。离开灵矽，在 Web
 上仍能学完技能、打完一局。
+
+| 入口                                             | 说明             |
+| ------------------------------------------------ | ---------------- |
+| [Web 体验](https://lieyanliaoyuan.vercel.app)    | 浏览器完整体验   |
+| [技能练习录屏](docs/演示录屏/技能练习录屏.mov)   | 学技能名和完成度 |
+| [Web 对战录屏](docs/演示录屏/web%20对战录屏.mov) | 浏览器对电脑     |
+| [联机对战录屏](docs/演示录屏/联机对战录屏.mov)   | 玩家联机         |
 
 ## 怎么打
 
@@ -100,6 +109,13 @@ sh scripts/deploy_supabase.sh
 | `src/speech`       | 七牛语音                             |
 | `web`              | Next.js 界面和 BFF                   |
 | `src/game`         | 旧咒语 demo，保留备查                |
+
+## 分工
+
+| 成员   | 负责                         |
+| ------ | ---------------------------- |
+| 黄洪波 | 游戏玩法和规则设计、Web 开发 |
+| 佘维军 | 游戏引擎、灵矽 MCP 对接      |
 
 ## 协作
 
