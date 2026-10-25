@@ -1,6 +1,7 @@
 import { GameEngine, type SayDelivery } from "../../engine/service/game.ts";
 import type { EngineSnapshot } from "../../engine/service/game.ts";
 import { extractJoinCode } from "../../engine/service/game.ts";
+import { settleHubCall } from "./call_budget.ts";
 import { deviceKey, type HubCall, type LocalSend } from "./hub.ts";
 import { poolerDatabaseUrl } from "./postgres.ts";
 import { type RpcId, rpcResult } from "./protocol.ts";
@@ -38,6 +39,7 @@ type CallOutcome = {
 export class SqlHub {
   private sql: Sql | null = null;
   private readonly chains = new Map<string, Promise<void>>();
+  private readonly bound = new Map<string, string>();
 
   constructor(
     private readonly databaseUrl: string,
@@ -49,7 +51,14 @@ export class SqlHub {
     this.drain(sessionId).catch((error) => console.error("mcp drain", error));
   }
 
-  unwatch(_sessionId: string): void {}
+  unwatch(sessionId: string): void {
+    const key = this.bound.get(sessionId);
+    this.bound.delete(sessionId);
+    if (!key) return;
+    this.persistDisconnect(key).catch((error) => {
+      console.error("mcp disconnect", error);
+    });
+  }
 
   tick(sessionId: string): Promise<void> {
     return this.drain(sessionId).catch((error) => {
@@ -76,14 +85,17 @@ export class SqlHub {
 
   async call(input: HubCall): Promise<unknown | null> {
     const key = deviceKey(input.command.deviceId, input.command.seat);
-    try {
-      return await this.serialize(
-        key,
-        () => this.withBudget(CALL_BUDGET_MS, () => this.runCall(input, key)),
-      );
-    } catch (error) {
-      return await this.fallback(input, error);
-    }
+    input.command.sessionId = input.sessionId;
+    this.bound.set(input.sessionId, key);
+    const work = this.serialize(key, () => this.runCall(input, key));
+    return await settleHubCall(
+      work,
+      CALL_BUDGET_MS,
+      async (error) => {
+        this.dropSql();
+        return await this.recover(input, key, error);
+      },
+    );
   }
 
   private async runCall(
@@ -348,6 +360,57 @@ export class SqlHub {
     `;
   }
 
+  private async recover(
+    input: HubCall,
+    key: string,
+    error: unknown,
+  ): Promise<unknown> {
+    try {
+      const sql = await this.query();
+      const [row] = await sql<{ state: EngineSnapshot }[]>`
+        select state from ly_device_engine where device_key = ${key}
+      `;
+      const engine = new GameEngine();
+      engine.loadState(row?.state ?? null);
+      const heard = engine.replay(input.command);
+      if (heard) {
+        const body = rpcResult(input.rpcId, heard);
+        try {
+          await this.publish(input.sessionId, body);
+        } catch {
+          // 原句已经能返回给这次调用。
+        }
+        return body;
+      }
+    } catch (recoverError) {
+      console.error("mcp sql recover", recoverError);
+    }
+    return await this.fallback(input, error);
+  }
+
+  private async persistDisconnect(key: string): Promise<void> {
+    const sql = await this.query();
+    const [row] = await sql<{ state: EngineSnapshot }[]>`
+      select state from ly_device_engine where device_key = ${key}
+    `;
+    if (!row?.state) return;
+    const engine = new GameEngine();
+    engine.loadState(row.state);
+    const seat = key.endsWith(":A")
+      ? "A"
+      : key.endsWith(":B")
+      ? "B"
+      : undefined;
+    const deviceId = seat ? key.slice(0, -2) : key;
+    engine.markDisconnected(deviceId, seat);
+    await sql`
+      insert into ly_device_engine (device_key, state, updated_at)
+      values (${key}, ${sql.json(engine.exportState())}, now())
+      on conflict (device_key) do update
+      set state = excluded.state, updated_at = excluded.updated_at
+    `;
+  }
+
   private async fallback(input: HubCall, error: unknown): Promise<unknown> {
     console.error("mcp sql call", error);
     const silent = input.command.tool === "ack_playback" ||
@@ -374,25 +437,10 @@ export class SqlHub {
     return run;
   }
 
-  private async withBudget<T>(ms: number, work: () => Promise<T>): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const task = work();
-    task.catch(() => {});
-    try {
-      return await Promise.race([
-        task,
-        new Promise<T>((_, reject) => {
-          timer = setTimeout(() => {
-            const sql = this.sql;
-            this.sql = null;
-            sql?.end({ timeout: 1 }).catch(() => {});
-            reject(new Error(`mcp call budget ${ms}ms`));
-          }, ms);
-        }),
-      ]);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
+  private dropSql(): void {
+    const sql = this.sql;
+    this.sql = null;
+    sql?.end({ timeout: 1 }).catch(() => {});
   }
 
   private async query(): Promise<Sql> {

@@ -5,6 +5,7 @@ import {
   ACK_MS,
   COUNTDOWN_MS,
   CPU_MS_PER_GRAPHEME,
+  DISCONNECT_MS,
   due,
   VOICE_CPU_EXTRA_MS,
 } from "../clock/clock.ts";
@@ -77,6 +78,8 @@ export type EngineCommand = {
   seat?: Seat;
   voiceprint?: boolean;
   terminal?: TerminalKind;
+  /** MCP 会话。换会话且空档超过 10 秒，视为断线。同一会话里的停顿不算离开。 */
+  sessionId?: string;
 };
 
 type Mode = "VS_CPU" | "ONLINE" | "LOCAL_DUO";
@@ -95,7 +98,11 @@ type Actor = {
   pendingPractice: boolean;
   casting: boolean;
   wasInterrupted: boolean;
+  /** 被打断时，对方这一击已经算完的主持句。后到的施法完成要用整句，而不是只说被打断。 */
+  pendingHit: string | null;
   rematch: boolean;
+  lastSeenAt: number;
+  lastSessionId: string | null;
   /** 这个 opensAt 已经回过一次「还不能开口」。重复调用不再回同一句。 */
   echoedOpensAt: number | null;
 };
@@ -123,6 +130,8 @@ type BattleMeta = {
   cpuCompleteAt: number | null;
   countdownSent: boolean;
   ackDeadline: number | null;
+  disconnectDeadline: number | null;
+  disconnectedPlayerId: string | null;
 };
 
 type Cached = { signature: string; result: EngineResult };
@@ -313,6 +322,9 @@ export class GameEngine {
     this.actors.clear();
     for (const actor of next.actors) {
       if (actor.pendingPractice === undefined) actor.pendingPractice = false;
+      if (actor.pendingHit === undefined) actor.pendingHit = null;
+      if (actor.lastSeenAt === undefined) actor.lastSeenAt = 0;
+      if (actor.lastSessionId === undefined) actor.lastSessionId = null;
       if (actor.echoedOpensAt === undefined) actor.echoedOpensAt = null;
       this.actors.set(actor.key, actor);
     }
@@ -320,12 +332,45 @@ export class GameEngine {
     for (const room of next.rooms) this.rooms.set(room.code, room);
     this.metas.clear();
     for (const [battleId, meta] of next.metas ?? []) {
+      if (meta.disconnectDeadline === undefined) meta.disconnectDeadline = null;
+      if (meta.disconnectedPlayerId === undefined) {
+        meta.disconnectedPlayerId = null;
+      }
       this.metas.set(battleId, meta);
     }
     this.seen.clear();
     for (const [key, cached] of next.seen ?? []) this.seen.set(key, cached);
     this.seq = next.seq ?? 0;
     this.battles.restore(next.battles ?? []);
+  }
+
+  /**
+   * 同一条命令已经写进快照时，只把当时的主持句交回去。
+   * 不重新结算。枢纽超时后用它找回引擎原句。
+   */
+  replay(command: EngineCommand): SayDelivery | null {
+    const device = this.devices.get(command.deviceId);
+    if (!device) return null;
+    const seat = device.localDuo ? command.seat : undefined;
+    const actor = this.actors.get(actorKey(command.deviceId, seat));
+    if (!actor) return null;
+    const signature = `${command.tool}\n${normalize(command.text)}`;
+    const key = actor.battleId
+      ? `${actor.battleId}:${command.commandId}`
+      : `${actor.playerId}:${command.commandId}`;
+    const cached = this.seen.get(key);
+    if (!cached || cached.signature !== signature) return null;
+    return cached.result.caller;
+  }
+
+  /** SSE 断开时记下 10 秒截止。同一会话里的下一条命令若还没到期，不算离开。 */
+  markDisconnected(deviceId: string, seat?: Seat): void {
+    const actor = this.actors.get(actorKey(deviceId, seat));
+    if (!actor?.battleId || actor.phase !== "BATTLE") return;
+    const meta = this.metas.get(actor.battleId);
+    if (!meta || meta.disconnectedPlayerId) return;
+    meta.disconnectDeadline = this.now() + DISCONNECT_MS;
+    meta.disconnectedPlayerId = actor.playerId;
   }
 
   async handle(command: EngineCommand): Promise<EngineResult> {
@@ -368,6 +413,14 @@ export class GameEngine {
             "这局还在进行。直接念技能名。要结束就说投降。",
           ),
         );
+      } else if (
+        actor.phase === "REVIEW" && command.tool === "submit_utterance"
+      ) {
+        return this.remember(
+          idempotencyKey,
+          signature,
+          await this.finishedLine(actor),
+        );
       } else {
         return this.remember(
           idempotencyKey,
@@ -376,12 +429,25 @@ export class GameEngine {
         );
       }
     }
-    // 出招本身不推进电脑。否则电脑先结算并重开倒数，这句就只剩「三。二。一。」。
-    if (
-      actor.phase === "BATTLE" &&
-      (command.tool === "wait_event" || command.tool === "ack_playback")
-    ) {
-      await this.refresh(actor);
+    const presence = this.notePresence(actor, command);
+    if (actor.phase === "BATTLE") {
+      // 断线任何命令都判。电脑结算不放在出招前，否则这句会被收成「三。二。一。」。
+      const settleCpu = command.tool === "wait_event" ||
+        command.tool === "ack_playback";
+      await this.refresh(actor, settleCpu);
+    }
+    if (actor.phase === "REVIEW") {
+      return this.remember(
+        idempotencyKey,
+        signature,
+        this.takeOwn(actor) ?? await this.finishedLine(actor),
+      );
+    }
+    if (presence === "restored") {
+      this.pushes = [];
+      const status = await this.blood(actor);
+      status.say = `回来了。${status.say}`;
+      return this.remember(idempotencyKey, signature, status);
     }
     const caller = await this.dispatch(actor, device, command);
     return this.remember(idempotencyKey, signature, caller);
@@ -937,13 +1003,18 @@ export class GameEngine {
     if (actor.phase === "PRACTICE") {
       return this.practiceUtterance(actor, text, perfection);
     }
-    const cpu = await this.takeDueCpu(actor);
-    if (cpu) return cpu;
-    if (text === "看血") return await this.blood(actor);
+    if (text === "看血") {
+      if (actor.battleId && this.cpuDue(actor)) {
+        await this.resolveCpu(actor.battleId);
+      }
+      return await this.blood(actor);
+    }
     if (text === "还有哪些技能" || text === "有哪些技能") {
       return await this.listSkills(actor);
     }
     if (text === "投降") return await this.surrender(actor);
+    const cpu = await this.takeDueCpu(actor);
+    if (cpu) return cpu;
     if (!this.windowOpen(actor)) return await this.closedOrEarly(actor);
     return await this.cast(actor, text, commandId, perfection);
   }
@@ -986,6 +1057,8 @@ export class GameEngine {
   }
 
   private async blood(actor: Actor): Promise<SayDelivery> {
+    actor.wasInterrupted = false;
+    actor.pendingHit = null;
     const state = await this.load(actor.battleId);
     if (!state) return this.delivery(actor, "ACCEPTED", "");
     const you = state.players.find((player) =>
@@ -1205,6 +1278,7 @@ export class GameEngine {
       pushes.map((push) => push.delivery),
       after.status === "FINISHED",
     );
+    this.rememberHits(pushes);
     const mine = pushes.find((push) => this.forCaller(actor, push));
     for (const push of pushes) {
       if (push !== mine) this.pushes.push(push);
@@ -1213,7 +1287,47 @@ export class GameEngine {
       this.delivery(actor, "ACCEPTED", rejectionSay("BATTLE_ABORTED"));
   }
 
-  private async refresh(actor: Actor): Promise<void> {
+  private notePresence(
+    actor: Actor,
+    command: EngineCommand,
+  ): "ok" | "restored" {
+    const now = this.now();
+    const prev = actor.lastSeenAt ?? 0;
+    const prevSession = actor.lastSessionId ?? null;
+    const session = command.sessionId ?? null;
+    const gap = prev > 0 ? now - prev : 0;
+    const changed = Boolean(
+      session && prevSession && session !== prevSession,
+    );
+    let restored = false;
+    if (actor.phase === "BATTLE" && actor.battleId) {
+      const meta = this.metas.get(actor.battleId);
+      if (meta) {
+        const armed = meta.disconnectedPlayerId === actor.playerId &&
+          meta.disconnectDeadline !== null;
+        if (
+          armed && meta.disconnectDeadline !== null &&
+          now >= meta.disconnectDeadline
+        ) {
+          // 截止已到，留给 refresh 判负。
+        } else if (armed && meta.disconnectDeadline !== null) {
+          meta.disconnectDeadline = null;
+          meta.disconnectedPlayerId = null;
+          restored = true;
+        } else if (changed && gap >= DISCONNECT_MS) {
+          // 没收到断开回调时，换了会话且空档已经超过 10 秒，同样判负。
+          // 短空档换会话不打断正在进行的施法。
+          meta.disconnectDeadline = prev + DISCONNECT_MS;
+          meta.disconnectedPlayerId = actor.playerId;
+        }
+      }
+    }
+    actor.lastSeenAt = now;
+    if (session) actor.lastSessionId = session;
+    return restored ? "restored" : "ok";
+  }
+
+  private async refresh(actor: Actor, settleCpu: boolean): Promise<void> {
     const battleId = actor.battleId;
     if (!battleId) return;
     const meta = this.metas.get(battleId);
@@ -1221,13 +1335,32 @@ export class GameEngine {
     const kinds = due({
       opensAt: null,
       ackDeadline: meta.ackDeadline,
-      disconnectDeadline: null,
+      disconnectDeadline: meta.disconnectDeadline,
       cpuCompleteAt: meta.cpuCompleteAt,
     }, this.now());
+    if (kinds.includes("disconnect")) await this.forfeitDisconnect(battleId);
+    if (actor.phase !== "BATTLE") return;
     if (kinds.includes("ack") && !meta.countdownSent) {
       await this.openWindow(battleId, this.now());
     }
-    if (kinds.includes("cpu")) await this.resolveCpu(battleId);
+    if (actor.phase !== "BATTLE") return;
+    if (settleCpu && kinds.includes("cpu")) await this.resolveCpu(battleId);
+  }
+
+  private async forfeitDisconnect(battleId: string): Promise<void> {
+    const meta = this.metas.get(battleId);
+    const playerId = meta?.disconnectedPlayerId;
+    if (!meta || !playerId || meta.disconnectDeadline === null) return;
+    if (this.now() < meta.disconnectDeadline) return;
+    meta.disconnectDeadline = null;
+    meta.disconnectedPlayerId = null;
+    const state = await this.load(battleId);
+    if (!state || state.status !== "RUNNING") return;
+    const conceded = await this.sessions.concede(battleId, playerId);
+    if (!conceded.ok || !conceded.state) return;
+    for (const push of this.outcomePushes(conceded.state, "", null)) {
+      this.pushes.push(push);
+    }
   }
 
   private async openWindow(battleId: string, now: number): Promise<void> {
@@ -1284,6 +1417,7 @@ export class GameEngine {
       pushes.map((push) => push.delivery),
       after.status === "FINISHED",
     );
+    this.rememberHits(pushes);
     for (const push of pushes) this.pushes.push(push);
   }
 
@@ -1411,6 +1545,8 @@ export class GameEngine {
       cpuCompleteAt: null,
       countdownSent: false,
       ackDeadline: null,
+      disconnectDeadline: null,
+      disconnectedPlayerId: null,
     });
   }
 
@@ -1576,7 +1712,10 @@ export class GameEngine {
         pendingPractice: false,
         casting: false,
         wasInterrupted: false,
+        pendingHit: null,
         rematch: false,
+        lastSeenAt: 0,
+        lastSessionId: null,
         echoedOpensAt: null,
       };
       this.actors.set(key, actor);
@@ -1597,7 +1736,10 @@ export class GameEngine {
       pendingPractice: false,
       casting: false,
       wasInterrupted: false,
+      pendingHit: null,
       rematch: false,
+      lastSeenAt: 0,
+      lastSessionId: null,
       echoedOpensAt: null,
     };
   }
@@ -1606,11 +1748,15 @@ export class GameEngine {
     if (actor.wasInterrupted || actor.casting) {
       actor.wasInterrupted = false;
       actor.casting = false;
-      return this.delivery(
-        actor,
-        "CAST_INTERRUPTED",
-        rejectionSay("CAST_INTERRUPTED"),
-      );
+      const hit = actor.pendingHit;
+      actor.pendingHit = null;
+      this.dropOwnPushes(actor);
+      const say = !hit
+        ? rejectionSay("CAST_INTERRUPTED")
+        : hit.startsWith("吟唱被打断。")
+        ? hit
+        : `吟唱被打断。${hit}`;
+      return this.delivery(actor, "CAST_INTERRUPTED", say);
     }
     const state = await this.load(actor.battleId);
     const waiting = state?.status === "RUNNING" &&
@@ -1663,6 +1809,54 @@ export class GameEngine {
       "ROUND_NOT_OPEN",
       rejectionSay("ROUND_NOT_OPEN"),
       { wait: true },
+    );
+  }
+
+  private rememberHits(pushes: EnginePush[]): void {
+    for (const push of pushes) {
+      const member = this.actors.get(actorKey(push.deviceId, push.seat));
+      if (member?.wasInterrupted) member.pendingHit = push.delivery.say;
+    }
+  }
+
+  private dropOwnPushes(actor: Actor): void {
+    this.pushes = this.pushes.filter((push) =>
+      !(push.deviceId === actor.deviceId && push.seat === actor.seat)
+    );
+  }
+
+  private takeOwn(actor: Actor): SayDelivery | null {
+    const index = this.pushes.findIndex((push) =>
+      push.deviceId === actor.deviceId && push.seat === actor.seat
+    );
+    if (index < 0) return null;
+    const [push] = this.pushes.splice(index, 1);
+    return push?.delivery ?? null;
+  }
+
+  private async finishedLine(actor: Actor): Promise<SayDelivery> {
+    const state = await this.load(actor.battleId);
+    if (!state) return this.delivery(actor, "ACCEPTED", "你输了。");
+    const you = state.players.find((player) =>
+      player.playerId === actor.playerId
+    );
+    const opp = state.players.find((player) =>
+      player.playerId !== actor.playerId
+    );
+    return this.delivery(
+      actor,
+      "ACCEPTED",
+      outcomeSay({
+        skill: "",
+        self: false,
+        youHp: you?.hp ?? 0,
+        oppHp: opp?.hp ?? 0,
+        youShield: you?.shield ?? 0,
+        oppShield: opp?.shield ?? 0,
+        interrupted: false,
+        finished: true,
+        win: state.winnerPlayerId === actor.playerId,
+      }),
     );
   }
 

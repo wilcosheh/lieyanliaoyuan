@@ -22,6 +22,7 @@ async function call(
     seat?: "A" | "B";
     voiceprint?: boolean;
     terminal?: "voice" | "web";
+    sessionId?: string;
   } = {},
 ) {
   return await game.handle({
@@ -32,6 +33,7 @@ async function call(
     seat: extra.seat,
     voiceprint: extra.voiceprint,
     terminal: extra.terminal,
+    sessionId: extra.sessionId,
   });
 }
 
@@ -207,10 +209,12 @@ Deno.test("cpu cast interrupts a player who already began", async () => {
   const late = await call(game, "d1", "c6", "submit_utterance", "锐刃突刺");
   assertEquals(late.caller?.code, "CAST_INTERRUPTED");
   assertEquals(late.caller?.say.includes("吟唱被打断。"), true);
-  assertEquals(late.caller?.say.includes("中了"), true);
+  assertEquals(late.caller?.say.includes("中了疾风剑。"), true);
+  assertEquals(late.caller?.say.includes("你935血。"), true);
+  assertEquals(late.caller?.say.includes("对手1000血。"), true);
   assertEquals(late.caller?.say.includes("三。二。一。"), true);
   assertEquals(
-    late.pushes.some((push) => push.delivery.say.includes("中了")),
+    late.pushes.some((push) => push.deviceId === "d1"),
     false,
   );
 });
@@ -578,4 +582,199 @@ Deno.test("engine snapshot restores the selected character and the room", async 
     "1234",
   );
   assertEquals(joined.caller?.say, "已加入。请选角色并准备。");
+});
+
+Deno.test("slow cpu resolution does not replace 看血 or a late skill sentence", async () => {
+  const now = { value: 0 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  now.value = COUNTDOWN_MS + 3 * 400 + 2000;
+  const blood = await call(game, "d1", "c4", "submit_utterance", "看血");
+  assertEquals(blood.caller?.say.includes("中了"), false);
+  assertEquals(blood.caller?.say.includes("疾风剑"), false);
+  assertEquals(blood.caller?.say.includes("935"), true);
+  assertEquals(blood.caller?.say.includes("血"), true);
+  assertEquals(
+    blood.pushes.some((push) => push.delivery.say.includes("中了疾风剑")),
+    true,
+  );
+
+  const later = { value: 0 };
+  const again = engine(later);
+  await call(again, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(again, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(again, "d1", "c3", "submit_lobby_text", "准备");
+  later.value = COUNTDOWN_MS;
+  await call(again, "d1", "c4", "begin_cast");
+  later.value = COUNTDOWN_MS + 3 * 400 + 2000;
+  const late = await call(again, "d1", "c5", "submit_utterance", "锐刃突刺");
+  assertEquals(late.caller?.code, "CAST_INTERRUPTED");
+  assertEquals(late.caller?.say.includes("吟唱被打断。"), true);
+  assertEquals(late.caller?.say.includes("中了疾风剑。"), true);
+  assertEquals(late.caller?.say.startsWith("中了"), false);
+});
+
+Deno.test("disconnect longer than 10s forfeits and a shorter gap says 回来了", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑", {
+    sessionId: "s1",
+  });
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士", {
+    sessionId: "s1",
+  });
+  await call(game, "d1", "c3", "submit_lobby_text", "准备", {
+    sessionId: "s1",
+  });
+  now.value += 12_000;
+  const same = await call(game, "d1", "c4", "submit_utterance", "看血", {
+    sessionId: "s1",
+  });
+  assertEquals(same.caller?.phase, "BATTLE");
+  assertEquals(same.caller?.say.includes("你输了"), false);
+
+  const clock = { value: 1_000 };
+  const marked = new GameEngine({
+    now: () => clock.value,
+    random: () => 0.1234,
+  });
+  await call(marked, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(marked, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(marked, "d1", "c3", "submit_lobby_text", "准备");
+  marked.markDisconnected("d1");
+  clock.value += 3_000;
+  const restored = await call(marked, "d1", "c4", "submit_utterance", "看血");
+  assertEquals(restored.caller?.phase, "BATTLE");
+  assertEquals(restored.caller?.say.startsWith("回来了。"), true);
+  assertEquals(restored.caller?.say.includes("血"), true);
+
+  const gone = new GameEngine({
+    now: () => clock.value,
+    random: () => 0.1234,
+  });
+  await call(gone, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(gone, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(gone, "d1", "c3", "submit_lobby_text", "准备");
+  gone.markDisconnected("d1");
+  clock.value += 10_000;
+  const lost = await call(gone, "d1", "c4", "submit_utterance", "看血");
+  assertEquals(lost.caller?.phase, "REVIEW");
+  assertEquals(lost.caller?.say.includes("你输了。"), true);
+  assertEquals(lost.caller?.say.includes("1000血"), true);
+
+  const switched = engine({ value: 1_000 });
+  await call(switched, "d1", "c1", "submit_lobby_text", "对电脑", {
+    sessionId: "s1",
+  });
+  await call(switched, "d1", "c2", "submit_lobby_text", "烈焰剑士", {
+    sessionId: "s1",
+  });
+  await call(switched, "d1", "c3", "submit_lobby_text", "准备", {
+    sessionId: "s1",
+  });
+  const later = { value: 13_000 };
+  const jumped = new GameEngine({
+    now: () => later.value,
+    random: () => 0.1234,
+  });
+  jumped.loadState(switched.exportState());
+  const forfeited = await call(jumped, "d1", "c5", "submit_utterance", "看血", {
+    sessionId: "s2",
+  });
+  assertEquals(forfeited.caller?.phase, "REVIEW");
+  assertEquals(forfeited.caller?.say.includes("你输了。"), true);
+});
+
+Deno.test("online cast, interrupt and surrender are spoken to both sides", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  const opened = await call(game, "host", "c1", "submit_lobby_text", "开房间");
+  assertEquals(opened.caller?.say.includes("1、2、3、4"), true);
+  const joined = await call(
+    game,
+    "guest",
+    "c2",
+    "submit_lobby_text",
+    "加入房间，房间号1234",
+  );
+  assertEquals(joined.caller?.say, "已加入。请选角色并准备。");
+  assertEquals(joined.pushes[0]?.delivery.say.includes("对手来了"), true);
+  await call(game, "host", "c3", "submit_lobby_text", "烈焰剑士");
+  await call(game, "guest", "c4", "submit_lobby_text", "圣光守卫");
+  await call(game, "host", "c5", "submit_lobby_text", "准备");
+  const guestReady = await call(
+    game,
+    "guest",
+    "c6",
+    "submit_lobby_text",
+    "准备",
+  );
+  assertEquals(guestReady.caller?.say.includes("三。二。一。"), true);
+  assertEquals(
+    guestReady.pushes[0]?.delivery.say.includes("三。二。一。"),
+    true,
+  );
+
+  now.value += COUNTDOWN_MS;
+  await call(game, "guest", "c7", "begin_cast");
+  const slash = await call(game, "host", "c8", "submit_utterance", "疾风剑");
+  assertEquals(slash.caller?.say.includes("疾风剑命中。"), true);
+  assertEquals(slash.caller?.say.includes("你1000血。"), true);
+  assertEquals(slash.caller?.say.includes("对手935血。"), true);
+  const guestHit = slash.pushes.find((push) => push.deviceId === "guest");
+  assertEquals(guestHit?.delivery.say.includes("吟唱被打断。"), true);
+  assertEquals(guestHit?.delivery.say.includes("中了疾风剑。"), true);
+  assertEquals(guestHit?.delivery.say.includes("你935血。"), true);
+  assertEquals(guestHit?.delivery.say.includes("对手1000血。"), true);
+
+  const late = await call(game, "guest", "c9", "submit_utterance", "守阵重击");
+  assertEquals(late.caller?.code, "CAST_INTERRUPTED");
+  assertEquals(late.caller?.say.includes("吟唱被打断。"), true);
+  assertEquals(late.caller?.say.includes("中了疾风剑。"), true);
+  assertEquals(late.caller?.say.includes("你935血。"), true);
+
+  const surrendered = await call(
+    game,
+    "host",
+    "c10",
+    "submit_utterance",
+    "投降",
+  );
+  assertEquals(surrendered.caller?.say.includes("你输了。"), true);
+  assertEquals(surrendered.caller?.say.includes("你1000血。"), true);
+  assertEquals(surrendered.caller?.say.includes("对手935血。"), true);
+  const guestWin = surrendered.pushes.find((push) => push.deviceId === "guest");
+  assertEquals(guestWin?.delivery.say.includes("你赢了。"), true);
+  assertEquals(guestWin?.delivery.say.includes("你935血。"), true);
+
+  const review = await call(game, "guest", "c11", "submit_utterance", "看血");
+  assertEquals(review.caller?.phase, "REVIEW");
+  assertEquals(review.caller?.say.includes("你赢了。"), true);
+  assertEquals(review.caller?.say.includes("你935血。"), true);
+  assertEquals(review.caller?.say.includes("对手1000血。"), true);
+});
+
+Deno.test("replay returns the committed sentence and ignores an unseen command", async () => {
+  const game = engine({ value: 0 });
+  await call(game, "d1", "c1", "submit_lobby_text", "烈焰剑士");
+  const copy = engine({ value: 0 });
+  copy.loadState(game.exportState());
+  const heard = copy.replay({
+    deviceId: "d1",
+    commandId: "c1",
+    tool: "submit_lobby_text",
+    text: "烈焰剑士",
+  });
+  assertEquals(heard?.say, "已选烈焰剑士。");
+  assertEquals(
+    copy.replay({
+      deviceId: "d1",
+      commandId: "missing",
+      tool: "submit_lobby_text",
+      text: "烈焰剑士",
+    }),
+    null,
+  );
 });

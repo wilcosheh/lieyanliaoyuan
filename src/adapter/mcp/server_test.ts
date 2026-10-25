@@ -254,3 +254,165 @@ Deno.test("the next wait_event still hears an opponent who arrived after the hea
     "对手来了。请选角色并准备。",
   );
 });
+
+Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after 10s", async () => {
+  const now = { value: 1_000 };
+  const handle = createMcpServer({
+    engine: new GameEngine({ now: () => now.value, random: () => 0.1234 }),
+    connectionKey: "secret",
+    waitHoldMs: 80,
+  });
+  const say = async (
+    id: number,
+    sessionId: string,
+    name: string,
+    args: Record<string, string>,
+  ) => {
+    const response = await handle(
+      new Request("http://localhost/mcp?key=secret", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer secret",
+          "content-type": "application/json",
+          accept: "application/json",
+          "mcp-session-id": sessionId,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      }),
+    );
+    const body = await response.json();
+    const content = body.result?.content ?? [];
+    return {
+      text: content.map((block: { text?: string }) => block.text ?? "").join(
+        "",
+      ),
+      phase: String(body.result?.structuredContent?.phase ?? ""),
+      code: String(body.result?.structuredContent?.code ?? ""),
+    };
+  };
+
+  await say(1, "cpu", "submit_lobby_text", {
+    device_id: "cpu",
+    text: "对电脑",
+  });
+  await say(2, "cpu", "submit_lobby_text", {
+    device_id: "cpu",
+    text: "烈焰剑士",
+  });
+  const ready = await say(3, "cpu", "submit_lobby_text", {
+    device_id: "cpu",
+    text: "准备",
+  });
+  assertEquals(ready.text.includes("三。二。一。"), true);
+  now.value = 1_000 + 3_000 + 3 * 400 + 2_000;
+  const blood = await say(4, "cpu", "submit_utterance", {
+    device_id: "cpu",
+    text: "看血",
+  });
+  assertEquals(blood.text.includes("中了"), false);
+  assertEquals(blood.text.includes("935"), true);
+  const pushed = await say(5, "cpu", "wait_event", { device_id: "cpu" });
+  assertEquals(pushed.text.includes("中了疾风剑。"), true);
+  now.value += 12_000;
+  const lost = await say(6, "cpu-2", "submit_utterance", {
+    device_id: "cpu",
+    text: "看血",
+  });
+  assertEquals(lost.phase, "REVIEW");
+  assertEquals(lost.text.includes("你输了。"), true);
+
+  const online = { value: 1_000 };
+  const rooms = createMcpServer({
+    engine: new GameEngine({ now: () => online.value, random: () => 0.1234 }),
+    connectionKey: "secret",
+    waitHoldMs: 80,
+  });
+  const roomSay = async (
+    id: number,
+    sessionId: string,
+    name: string,
+    args: Record<string, string>,
+  ) => {
+    const response = await rooms(
+      new Request("http://localhost/mcp?key=secret", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer secret",
+          "content-type": "application/json",
+          accept: "application/json",
+          "mcp-session-id": sessionId,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      }),
+    );
+    const body = await response.json();
+    const content = body.result?.content ?? [];
+    return content.map((block: { text?: string }) => block.text ?? "").join("");
+  };
+  const opened = await roomSay(1, "host", "submit_lobby_text", {
+    device_id: "host",
+    text: "开房间",
+  });
+  assertEquals(opened.includes("1、2、3、4"), true);
+  assertEquals(opened.includes("刚才没听清"), false);
+  const joined = await roomSay(2, "guest", "submit_lobby_text", {
+    device_id: "guest",
+    text: "加入房间，房间号1234",
+  });
+  assertEquals(joined, "已加入。请选角色并准备。");
+  await roomSay(3, "host", "submit_lobby_text", {
+    device_id: "host",
+    text: "烈焰剑士",
+  });
+  await roomSay(4, "guest", "submit_lobby_text", {
+    device_id: "guest",
+    text: "圣光守卫",
+  });
+  await roomSay(5, "host", "submit_lobby_text", {
+    device_id: "host",
+    text: "准备",
+  });
+  const started = await roomSay(6, "guest", "submit_lobby_text", {
+    device_id: "guest",
+    text: "准备",
+  });
+  assertEquals(started.includes("三。二。一。"), true);
+  online.value += 3_000;
+  await roomSay(7, "guest", "begin_cast", { device_id: "guest" });
+  const slash = await roomSay(8, "host", "submit_utterance", {
+    device_id: "host",
+    text: "疾风剑",
+  });
+  assertEquals(slash.includes("疾风剑命中。"), true);
+  assertEquals(slash.includes("你1000血。"), true);
+  assertEquals(slash.includes("对手935血。"), true);
+  const interrupted = await roomSay(9, "guest", "submit_utterance", {
+    device_id: "guest",
+    text: "守阵重击",
+  });
+  assertEquals(interrupted.includes("吟唱被打断。"), true);
+  assertEquals(interrupted.includes("中了疾风剑。"), true);
+  assertEquals(interrupted.includes("你935血。"), true);
+  const conceded = await roomSay(10, "host", "submit_utterance", {
+    device_id: "host",
+    text: "投降",
+  });
+  assertEquals(conceded.includes("你输了。"), true);
+  assertEquals(conceded.includes("刚才没听清"), false);
+  const won = await roomSay(11, "guest", "submit_utterance", {
+    device_id: "guest",
+    text: "看血",
+  });
+  assertEquals(won.includes("你赢了。"), true);
+  assertEquals(won.includes("你935血。"), true);
+});
