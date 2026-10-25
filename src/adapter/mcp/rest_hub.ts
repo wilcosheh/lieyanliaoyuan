@@ -117,11 +117,6 @@ export class RestHub {
     if (JSON.stringify(snapshot) !== JSON.stringify(next)) {
       await this.saveEngine(key, next);
     }
-    let body: unknown | null = null;
-    if (result.caller) {
-      body = rpcResult(input.rpcId, result.caller);
-      await this.publish(input.sessionId, body);
-    }
     for (const push of result.pushes) {
       await this.route(
         deviceKey(push.deviceId, push.seat),
@@ -132,10 +127,11 @@ export class RestHub {
       await this.park(key, input.sessionId, input.rpcId);
       return null;
     }
-    if (!result.caller) {
-      body = rpcResult(input.rpcId, EMPTY);
-      await this.publish(input.sessionId, body);
-    }
+    const body = result.caller
+      ? rpcResult(input.rpcId, result.caller)
+      : rpcResult(input.rpcId, EMPTY);
+    // 状态已写完再投递；本机 SSE 立刻送到，跨 isolate 再落库。
+    await this.publish(input.sessionId, body);
     return body;
   }
 

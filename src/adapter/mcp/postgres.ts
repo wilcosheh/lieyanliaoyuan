@@ -252,6 +252,11 @@ export function listenDatabaseUrl(raw: string): string {
   return raw.replace(":6543/", ":5432/");
 }
 
+/** 短事务走事务池，避免每次冷连接直连 5432。LISTEN 仍用 listenDatabaseUrl。 */
+export function poolerDatabaseUrl(raw: string): string {
+  return raw.replace(":5432/", ":6543/");
+}
+
 function restoreRpcId(value: string): RpcId {
   return /^-?\d+$/.test(value) ? Number(value) : value;
 }
