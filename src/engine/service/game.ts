@@ -856,12 +856,12 @@ export class GameEngine {
     const other = this.opponent(actor);
     if (!other?.rematch) {
       if (other) {
-        this.side(other, this.delivery(other, "ACCEPTED", "对手想再来一局。"));
+        this.side(other, this.speak(other, "对手想再来一局。"));
       }
-      return this.delivery(actor, "ACCEPTED", "");
+      return this.speak(actor, "已记下。等对手也说再来一局。");
     }
     if (!actor.characterId || !other.characterId || !actor.battleId) {
-      return this.delivery(actor, "ACCEPTED", "");
+      return this.speak(actor, "先说角色名，再说再来一局。");
     }
     const left = actor.seat === "B" ? other : actor;
     const right = actor.seat === "B" ? actor : other;
@@ -944,46 +944,34 @@ export class GameEngine {
   ): SayDelivery {
     if (wantsEndPractice(text)) {
       actor.phase = "LOBBY";
-      return this.delivery(
-        actor,
-        "ACCEPTED",
-        "练习结束。说对电脑打一局，或开房间。",
-      );
+      return this.speak(actor, "练习结束。说对电脑打一局，或开房间。");
     }
     if (!actor.characterId) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     const character = getCharacter(actor.characterId);
     if (!character) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     const matched = matchSkill(character, text);
     if (!matched.ok) {
-      return this.delivery(
-        actor,
-        matched.code,
-        rejectionSay(matched.code),
-      );
+      return this.speak(actor, rejectionSay(matched.code), matched.code);
     }
     const score = perfection === undefined
       ? matched.match.perfection
       : perfection;
     if (!Number.isFinite(score) || score < 0 || score > 100) {
-      return this.delivery(actor, "INVALID_PERFECTION", "");
+      return this.speak(actor, "", "INVALID_PERFECTION");
     }
-    return this.delivery(
-      actor,
-      "ACCEPTED",
-      practiceSay(matched.match.skill, score),
-    );
+    return this.speak(actor, practiceSay(matched.match.skill, score));
   }
 
   private async blood(actor: Actor): Promise<SayDelivery> {
@@ -1015,26 +1003,25 @@ export class GameEngine {
 
   private async listSkills(actor: Actor): Promise<SayDelivery> {
     if (!actor.characterId) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     const character = getCharacter(actor.characterId);
     if (!character) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     if (
       !actor.battleId || actor.phase === "PRACTICE" || actor.phase === "LOBBY"
     ) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "ACCEPTED",
         skillListSay(character.skills.map((skill) => skill.name)),
       );
     }

@@ -138,11 +138,13 @@ Deno.test("practice reports perfection 100 and rejects a second skill in one lin
 
   const hit = await call(game, "d1", "c3", "submit_utterance", "破风斩");
   assertEquals(hit.caller?.say, "完成度100。破风斩。造成65点伤害。");
+  assertEquals(hit.caller?.wait, false);
 
   const near = await call(game, "d1", "c3b", "submit_utterance", "破风站");
   assertEquals(near.caller?.code, "ACCEPTED");
   assertEquals(near.caller?.say.includes("破风斩"), true);
   assertEquals(near.caller?.say.includes("完成度100"), false);
+  assertEquals(near.caller?.wait, false);
 
   const ambiguous = await call(
     game,
@@ -153,10 +155,12 @@ Deno.test("practice reports perfection 100 and rejects a second skill in one lin
   );
   assertEquals(ambiguous.caller?.code, "AMBIGUOUS_SKILL");
   assertEquals(ambiguous.caller?.say, "一次一道。");
+  assertEquals(ambiguous.caller?.wait, false);
 
   const done = await call(game, "d1", "c5", "submit_utterance", "结束练习");
   assertEquals(done.caller?.say, "练习结束。说对电脑打一局，或开房间。");
   assertEquals(done.caller?.phase, "LOBBY");
+  assertEquals(done.caller?.wait, false);
 });
 
 Deno.test("the same command id replays and a changed line is rejected", async () => {
@@ -470,11 +474,29 @@ Deno.test("versus cpu and online join still open without practice interference",
   await call(cpu, "d1", "c2", "submit_lobby_text", "风行弓手");
   const ready = await call(cpu, "d1", "c3", "submit_lobby_text", "准备");
   assertEquals(ready.caller?.say.includes("三。二。一。"), true);
+  assertEquals(ready.caller?.wait, true);
 
   const online = engine({ value: 0 });
-  await call(online, "host", "c1", "submit_lobby_text", "开房间");
-  await call(online, "guest", "c2", "submit_lobby_text", "1234");
-  await call(online, "host", "c3", "submit_lobby_text", "烈焰剑士");
+  const opened = await call(
+    online,
+    "host",
+    "c1",
+    "submit_lobby_text",
+    "开房间",
+  );
+  assertEquals(opened.caller?.wait, true);
+  const joined = await call(online, "guest", "c2", "submit_lobby_text", "1234");
+  assertEquals(joined.caller?.wait, false);
+  assertEquals(joined.pushes[0]?.delivery.say, "对手来了。请选角色并准备。");
+  assertEquals(joined.pushes[0]?.delivery.wait, true);
+  const hostSel = await call(
+    online,
+    "host",
+    "c3",
+    "submit_lobby_text",
+    "烈焰剑士",
+  );
+  assertEquals(hostSel.pushes[0]?.delivery.say, "对手选了烈焰剑士。");
   await call(online, "guest", "c4", "submit_lobby_text", "风行弓手");
   const hostReady = await call(
     online,
@@ -484,6 +506,7 @@ Deno.test("versus cpu and online join still open without practice interference",
     "准备",
   );
   assertEquals(hostReady.caller?.say, "你已准备。等对手准备。");
+  assertEquals(hostReady.pushes[0]?.delivery.say, "对手已准备。");
   const guestReady = await call(
     online,
     "guest",
@@ -492,6 +515,10 @@ Deno.test("versus cpu and online join still open without practice interference",
     "准备",
   );
   assertEquals(guestReady.caller?.say.includes("三。二。一。"), true);
+  assertEquals(
+    guestReady.pushes[0]?.delivery.say.includes("三。二。一。"),
+    true,
+  );
 });
 
 Deno.test("engine snapshot restores the selected character and the room", async () => {
