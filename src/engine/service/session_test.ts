@@ -56,7 +56,7 @@ Deno.test("concurrent actions from two devices produce exactly one round winner"
       playerId: "player-a",
       commandId: "device-a-round-1",
       roundNo: 1,
-      skillText: "破风斩",
+      skillText: "疾风剑",
     }),
     deviceB.submitAction("shared-battle", {
       playerId: "player-b",
@@ -93,7 +93,7 @@ Deno.test("same command retry is idempotent and does not create a new version", 
     playerId: "player-a",
     commandId: "retry-command",
     roundNo: 1,
-    skillText: "破风斩",
+    skillText: "疾风剑",
   };
   const first = await deviceA.submitAction("shared-battle", input);
   expectOk(first);
@@ -109,7 +109,7 @@ Deno.test("a new service instance restores the complete battle", async () => {
     playerId: "player-a",
     commandId: "before-restart",
     roundNo: 1,
-    skillText: "破风斩",
+    skillText: "疾风剑",
     perfection: 90,
   });
   expectOk(accepted);
@@ -138,7 +138,7 @@ Deno.test("concurrent phase advances cannot skip a phase", async () => {
       playerId: "player-a",
       commandId: "advance-race-action",
       roundNo: 1,
-      skillText: "破风斩",
+      skillText: "疾风剑",
     }),
   );
   const before = await deviceA.getBattle("shared-battle");

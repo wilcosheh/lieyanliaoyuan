@@ -32,13 +32,13 @@ Deno.test("built-in character configurations satisfy the seven-skill contract", 
 
 Deno.test("skill lookup is exact and scoped to the selected character", () => {
   assertEquals(getCharacter("swordsman")?.name, "烈焰剑士");
-  assertEquals(getSkill("swordsman", "swordsman_basic")?.name, "破风斩");
+  assertEquals(getSkill("swordsman", "swordsman_basic")?.name, "疾风剑");
   assertEquals(
-    matchSkillByExactName("swordsman", "破风斩")?.id,
+    matchSkillByExactName("swordsman", "疾风剑")?.id,
     "swordsman_basic",
   );
-  assertEquals(matchSkillByExactName("swordsman", " 破风斩"), undefined);
-  assertEquals(matchSkillByExactName("guardian", "破风斩"), undefined);
+  assertEquals(matchSkillByExactName("swordsman", " 疾风剑"), undefined);
+  assertEquals(matchSkillByExactName("guardian", "疾风剑"), undefined);
 });
 
 Deno.test("controller refuses an invalid ruleset at construction", () => {
@@ -85,7 +85,7 @@ Deno.test("controller snapshots configuration so callers cannot change live rule
       playerId: "a",
       commandId: "stable-command",
       roundNo: 1,
-      skillText: "破风斩",
+      skillText: "疾风剑",
     }).ok,
     true,
   );

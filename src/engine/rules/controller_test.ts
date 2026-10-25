@@ -141,8 +141,8 @@ Deno.test("round phases are explicit and only advance through controller", () =>
 
 Deno.test("skill text is exact and invalid actions do not consume the round", () => {
   const game = new Game();
-  expectError(game.submit("a", " 破风斩"), "ASR_FAILED");
-  expectError(game.submit("a", "破风站"), "ASR_FAILED");
+  expectError(game.submit("a", " 疾风剑"), "ASR_FAILED");
+  expectError(game.submit("a", "疾风箭"), "ASR_FAILED");
   expectError(game.submit("a", "守阵重击"), "ASR_FAILED");
   assertEquals(game.roundNo, 1);
   assertEquals(
@@ -150,20 +150,20 @@ Deno.test("skill text is exact and invalid actions do not consume the round", ()
     "WAITING_COMMAND",
   );
   assertEquals(game.player("a").skillUsage, {});
-  expectOk(game.action("a", "破风斩"));
+  expectOk(game.action("a", "疾风剑"));
   assertEquals(game.roundNo, 2);
 });
 
 Deno.test("skill perfection defaults to 100 and scales direct damage", () => {
   const full = new Game();
-  const accepted = full.submit("a", "破风斩");
+  const accepted = full.submit("a", "疾风剑");
   expectOk(accepted);
   assertEquals(accepted.state.currentRound?.perfection, 100);
   expectOk(full.controller.advance());
   assertEquals(full.player("b").hp, 935);
 
   const partial = new Game();
-  expectOk(partial.action("a", "破风斩", 90));
+  expectOk(partial.action("a", "疾风剑", 90));
   assertEquals(partial.player("b").hp, 941);
   const damage = partial.controller.getState().events.findLast((event) =>
     event.type === "DAMAGE_APPLIED"
@@ -203,7 +203,7 @@ Deno.test("invalid perfection does not consume skill or round", () => {
   const game = new Game();
   for (const perfection of [-1, 100.1, Number.NaN]) {
     expectError(
-      game.submit("a", "破风斩", undefined, perfection),
+      game.submit("a", "疾风剑", undefined, perfection),
       "INVALID_PERFECTION",
     );
   }
@@ -213,16 +213,16 @@ Deno.test("invalid perfection does not consume skill or round", () => {
   );
   assertEquals(game.player("a").skillUsage, {});
 
-  expectOk(game.action("a", "破风斩", 0));
+  expectOk(game.action("a", "疾风剑", 0));
   assertEquals(game.player("b").hp, 1000);
 });
 
 Deno.test("basic skill is unlimited but cannot be used in consecutive rounds", () => {
   const game = new Game();
-  expectOk(game.action("a", "破风斩"));
-  expectError(game.submit("a", "破风斩"), "BASIC_CONSECUTIVE_REJECTED");
+  expectOk(game.action("a", "疾风剑"));
+  expectError(game.submit("a", "疾风剑"), "BASIC_CONSECUTIVE_REJECTED");
   expectOk(game.action("a", "锐刃突刺"));
-  expectOk(game.action("a", "破风斩"));
+  expectOk(game.action("a", "疾风剑"));
   assertEquals(game.player("a").skillUsage.swordsman_basic, 2);
 });
 
@@ -238,7 +238,7 @@ Deno.test("one-use skills reject reuse and stale round commands cannot enter the
 
 Deno.test("limited-repeat skill enforces gap and maximum uses", () => {
   const game = new Game("guardian", "swordsman");
-  expectOk(game.action("b", "破风斩"));
+  expectOk(game.action("b", "疾风剑"));
   expectOk(game.action("a", "安魂微光"));
   assertEquals(game.player("a").hp, 1000);
   expectError(game.submit("a", "安魂微光"), "REUSE_LIMIT_REJECTED");
@@ -252,7 +252,7 @@ Deno.test("limited-repeat skill enforces gap and maximum uses", () => {
 Deno.test("damage buffs use trigger counts and damage still passes through shield first", () => {
   const game = new Game();
   expectOk(game.action("a", "战意燃锋诀"));
-  expectOk(game.action("a", "破风斩"));
+  expectOk(game.action("a", "疾风剑"));
   assertEquals(game.player("b").hp, 919);
   expectOk(game.action("a", "锐刃突刺"));
   assertEquals(game.player("b").hp, 819);

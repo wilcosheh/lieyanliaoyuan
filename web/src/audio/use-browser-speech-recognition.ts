@@ -12,7 +12,7 @@ import {
   type BrowserSpeechResult,
   supportsBrowserSpeechRecognition,
 } from "./browser-speech-recognizer";
-import type { RecorderState } from "./wav-recorder";
+import { WavRecorder, type RecorderState } from "./wav-recorder";
 
 type State = { status: RecorderState; error: string | null };
 type Action = { type: "status"; status: RecorderState } | {
@@ -60,6 +60,7 @@ export function useBrowserSpeechRecognition(
     browserSupportServerSnapshot,
   );
   const recognizer = useRef<BrowserSpeechRecognizer | null>(null);
+  const audioRecorder = useRef<WavRecorder | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -68,10 +69,12 @@ export function useBrowserSpeechRecognition(
       mounted.current = false;
       recognizer.current?.abort();
       recognizer.current = null;
+      void audioRecorder.current?.stop().catch(() => undefined);
+      audioRecorder.current = null;
     };
   }, []);
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     if (state.status !== "idle" && state.status !== "error") return;
     if (!supportsBrowserSpeechRecognition()) {
       dispatch({ type: "error", message: errorMessages.BROWSER_SPEECH_NOT_SUPPORTED });
@@ -79,6 +82,15 @@ export function useBrowserSpeechRecognition(
     }
     dispatch({ type: "status", status: "requesting" });
     try {
+      // Web Speech API 不提供原始音频，因此并行采集一份 WAV 用于成功后的回放。
+      const recorder = new WavRecorder();
+      try {
+        await recorder.start();
+        audioRecorder.current = recorder;
+      } catch {
+        // 录音采集失败不阻断浏览器识别，仍允许完成行动提交。
+        audioRecorder.current = null;
+      }
       const controller = new BrowserSpeechRecognizer();
       recognizer.current = controller;
       controller.start({
@@ -91,7 +103,19 @@ export function useBrowserSpeechRecognition(
           if (mounted.current) {
             dispatch({ type: "status", status: "encoding" });
           }
-          void onComplete(result).then(
+          void (async () => {
+            let audio: Blob | undefined;
+            const recorder = audioRecorder.current;
+            audioRecorder.current = null;
+            if (recorder) {
+              try {
+                audio = await recorder.stop();
+              } catch {
+                audio = undefined;
+              }
+            }
+            return await onComplete({ ...result, audio });
+          })().then(
             () => {
               recognizer.current = null;
               if (mounted.current) dispatch({ type: "status", status: "idle" });
@@ -108,6 +132,9 @@ export function useBrowserSpeechRecognition(
           );
         },
         onError: (error) => {
+          const recorder = audioRecorder.current;
+          audioRecorder.current = null;
+          void recorder?.stop().catch(() => undefined);
           recognizer.current = null;
           if (mounted.current) {
             dispatch({
@@ -118,6 +145,9 @@ export function useBrowserSpeechRecognition(
         },
       });
     } catch (error) {
+      const recorder = audioRecorder.current;
+      audioRecorder.current = null;
+      void recorder?.stop().catch(() => undefined);
       recognizer.current = null;
       dispatch({
         type: "error",

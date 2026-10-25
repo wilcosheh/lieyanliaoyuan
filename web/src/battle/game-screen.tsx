@@ -28,6 +28,7 @@ import type {
 } from "@core/adapter/http/dto.ts";
 import { webApi } from "@web/api/client";
 import { useBrowserSpeechRecognition } from "@web/audio/use-browser-speech-recognition";
+import { playRecordedAudio } from "@web/audio/play-recording";
 import { useVoiceRecorder } from "@web/audio/use-voice-recorder";
 
 type Mode = "prepare" | "battle" | "result";
@@ -258,12 +259,13 @@ function BattleView(
       battle.roundNo,
       audio,
     );
+    playRecordedAudio(audio);
     setLastAction(`${result.transcript} · ${result.perfection}%`);
     queryClient.setQueryData(["battle", battleId], result.battle);
   }, [battle.roundNo, battleId, queryClient]);
   const recorder = useVoiceRecorder(sendVoice);
   const sendRecognized = useCallback(async (
-    result: { transcript: string; confidence?: number },
+    result: { transcript: string; confidence?: number; audio?: Blob },
   ) => {
     if (!battle.roundNo) return;
     const action = await webApi.recognized(
@@ -273,6 +275,7 @@ function BattleView(
       result.transcript,
       result.confidence,
     );
+    if (result.audio) playRecordedAudio(result.audio);
     setLastAction(`${action.transcript} · ${action.perfection}%`);
     queryClient.setQueryData(["battle", battleId], action.battle);
   }, [battle.roundNo, battleId, queryClient]);

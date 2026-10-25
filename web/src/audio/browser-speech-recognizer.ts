@@ -1,6 +1,8 @@
 export type BrowserSpeechResult = {
   transcript: string;
   confidence?: number;
+  /** 浏览器识别期间同步采集的原始语音，供技能生效后回放。 */
+  audio?: Blob;
 };
 
 type RecognitionAlternativeLike = {
