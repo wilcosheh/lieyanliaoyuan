@@ -1,4 +1,5 @@
 # 合并进 main 后：复用 ci 检查，再部署 Supabase。
+# Web 不在这里部署。Vercel 连着本仓库：合并进 main 发布生产，其他分支发布预览。
 #
 # 仓库 Secrets：
 #   SUPABASE_ACCESS_TOKEN

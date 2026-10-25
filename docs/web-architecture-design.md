@@ -112,7 +112,8 @@ Web 页面调用同源 `/api/web/v1`，不需要跨域。MCP 仍然运行现有
 
 ### 4.2 生产部署
 
-- Next.js 部署到支持 Node Runtime 的平台或容器。
+- Next.js 部署到 Vercel，根目录是 `web`。生产分支 `main`
+  的推送会发布生产，其他分支发布预览。
 - MCP 继续部署到现有 Supabase Function。
 - 两者连接同一个 Supabase Postgres。
 - Next.js 使用 `SUPABASE_SERVICE_ROLE_KEY`
