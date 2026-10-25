@@ -16,6 +16,23 @@ type Session = {
   send: (event: string, data: string) => void;
 };
 
+/** 短于灵矽掐工具调用的时间；到点回「。」再等，避免 context canceled。 */
+const DEFAULT_WAIT_HOLD_MS = 10_000;
+const MIN_WAIT_HOLD_MS = 1_000;
+const MAX_WAIT_HOLD_MS = 14_000;
+
+/** 解析 WAIT_HOLD_MS。非法或越界时用默认。 */
+export function parseWaitHoldMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_WAIT_HOLD_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_WAIT_HOLD_MS;
+  const ms = Math.trunc(n);
+  if (ms < MIN_WAIT_HOLD_MS || ms > MAX_WAIT_HOLD_MS) {
+    return DEFAULT_WAIT_HOLD_MS;
+  }
+  return ms;
+}
+
 type Hub = MemoryHub | RestHub | SqlHub;
 
 function createHub(
@@ -52,12 +69,12 @@ const TOOLS: Array<{ name: ToolName; description: string }> = [
   {
     name: "submit_lobby_text",
     description:
-      "大厅或复盘里的原话。选角、练习、对电脑、人机对战、开房间、创建房间、房间号、准备、再来一局、复盘。device_id 用提示词里的设备号，不要填烈焰燎原或角色名。text 填玩家原话。创建房间返回后若 wait 为 true，念完立刻循环 wait_event，直到听到开战。",
+      "大厅或复盘口令。选角、练习、对电脑、人机对战、开房间、创建房间、房间号、准备、再来一局、复盘。device_id 用提示词里的设备号，不要填烈焰燎原或角色名。text 填玩家刚说的字。创建房间返回后若 wait 为 true，念完立刻循环 wait_event，直到听到开战。",
   },
   {
     name: "submit_utterance",
     description:
-      "练习或战场里的整句转写。练习里先认结束练习，战场里先认看血、还有哪些技能、投降，其余当作念完的技能。text 填原话，完成度可省略。",
+      "练习或战场里的整句转写。练习里先认结束练习，战场里先认看血、还有哪些技能、投降，其余当作念完的技能。text 填玩家刚说的字，完成度可省略。",
   },
   {
     name: "begin_cast",
@@ -142,7 +159,7 @@ export function createMcpServer(options: {
           sessions,
           hub,
           options.voiceprint === true,
-          options.waitHoldMs ?? 15_000,
+          options.waitHoldMs ?? DEFAULT_WAIT_HOLD_MS,
         );
       } catch (error) {
         console.error("mcp streamable", error);
@@ -548,4 +565,5 @@ export const handle = createMcpServer({
   databaseUrl: databaseUrl || undefined,
   supabaseUrl: supabaseUrl || undefined,
   serviceRoleKey: serviceRoleKey || undefined,
+  waitHoldMs: parseWaitHoldMs(Deno.env.get("WAIT_HOLD_MS")),
 });
