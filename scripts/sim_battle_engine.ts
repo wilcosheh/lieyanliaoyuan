@@ -3,7 +3,7 @@ import {
   type BattleSessionResponse,
   BattleSessionService,
   InMemoryBattleRepository,
-} from "../src/battle/index.ts";
+} from "../src/engine/index.ts";
 
 function requireSuccess<T>(
   response: BattleSessionResponse<T>,

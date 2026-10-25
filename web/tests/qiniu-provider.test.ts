@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { QiniuSpeechProvider } from "../../src/web/speech/qiniu_provider.ts";
+import { QiniuSpeechProvider } from "../../src/speech/qiniu_provider.ts";
 
 function provider(
   request: typeof fetch,

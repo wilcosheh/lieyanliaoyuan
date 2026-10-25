@@ -4,7 +4,7 @@
 
 Web 端可以在当前项目上叠加 Next.js，并且这是推荐方案。
 
-现有 Deno、Supabase Edge Function、MCP 和 `src/battle`
+现有 Deno、Supabase Edge Function、MCP 和 `src/engine`
 保持独立，在仓库根目录新增 `web/` Next.js 应用。Next.js 同时承担 Web 游戏界面和
 Web BFF 接入层；MCP 仍由现有同事维护，后续只需要接入相同的
 `BattleSessionService`。
@@ -49,7 +49,8 @@ Next.js 不应替换当前 Deno 服务，也不应让浏览器直接操作 Battl
 - Route Handler 使用 Node.js Runtime，不使用 Next Edge Runtime。
 - `BattleSessionService` 是唯一对局规则入口。
 - `SupabaseBattleRepository` 保存权威对局快照。
-- Web BFF 签发带 HMAC 的 HttpOnly 匿名会话 Cookie，签名中的玩家 ID 作为可信身份。
+- Web BFF 签发带 HMAC 的 HttpOnly 匿名会话 Cookie，签名中的玩家 ID
+  作为可信身份。
 - 七牛 ASR/TTS 通过服务端 `fetch` 调用，密钥只保存在服务端环境变量。
 
 选择 Node.js Runtime 的原因是语音上传、二进制响应、超时控制和后续音频处理在 Node
@@ -90,10 +91,10 @@ lieyanliaoyuan/
     tsconfig.json
 ```
 
-`src/web` 不依赖 Next.js，可以被本地 Deno 服务、Next Route Handler
+`src/adapter/http` 不依赖 Next.js，可以被本地 Deno 服务、Next Route Handler
 或以后新增的其他协议适配器复用。`web/app/api` 只负责 HTTP、认证和 DTO 转换。
 
-Next 客户端组件禁止直接导入 `src/battle`。只有标记为 `server-only`
+Next 客户端组件禁止直接导入 `src/engine`。只有标记为 `server-only`
 的服务端模块可以调用
 `BattleSessionService`，避免规则代码和服务端密钥进入浏览器包。
 
@@ -116,7 +117,8 @@ Web 页面调用同源 `/api/web/v1`，不需要跨域。MCP 仍然运行现有
 - 两者连接同一个 Supabase Postgres。
 - Next.js 使用 `SUPABASE_SERVICE_ROLE_KEY`
   访问对局仓库，但该密钥不能暴露给浏览器。
-- Web BFF 使用 `WEB_SESSION_SECRET` 校验匿名会话签名，再检查数据库中的对局成员关系。
+- Web BFF 使用 `WEB_SESSION_SECRET`
+  校验匿名会话签名，再检查数据库中的对局成员关系。
 
 不建议把 Next.js 构建产物塞进 Supabase MCP
 Function。两者运行时、部署频率、认证方式和超时特征不同，强行合并会增加故障影响范围。
@@ -237,10 +239,14 @@ type SpeechRecognitionResult = {
 
 - Dora 短语音听写响应不提供可用于伤害计算的置信度，首版固定回退为 `100`。
 - `confidenceSource` 固定为 `fallback`，用于明确该数值不是服务商置信度。
-- Web Speech API 返回有效 `0-1` 置信度时，由服务端乘以 100 并四舍五入；未返回时回退为 `100`。
-- 服务端仍保留 `0-100` 的 `perfection` 字段，便于后续更换支持置信度的模型时兼容对局接口。
-- 提交战斗核心前，Web 接入层移除识别文本中的空白以及首尾标点。例如 `破 风 斩。` 会按 `破风斩` 校验；同音错字、近似文本和其他角色技能不会被纠正或接受。
-- 匹配失败时接口返回 `ASR_FAILED`，并在错误详情中携带实际识别文本，供界面明确提示玩家。
+- Web Speech API 返回有效 `0-1` 置信度时，由服务端乘以 100
+  并四舍五入；未返回时回退为 `100`。
+- 服务端仍保留 `0-100` 的 `perfection`
+  字段，便于后续更换支持置信度的模型时兼容对局接口。
+- 提交战斗核心前，Web 接入层移除识别文本中的空白以及首尾标点。例如 `破 风 斩。`
+  会按 `破风斩` 校验；同音错字、近似文本和其他角色技能不会被纠正或接受。
+- 匹配失败时接口返回
+  `ASR_FAILED`，并在错误详情中携带实际识别文本，供界面明确提示玩家。
 
 不能用技能文字编辑距离生成完美程度，因为技能名称要求精确匹配，文字匹配和语音质量是两个不同概念。
 
@@ -276,8 +282,8 @@ QINIU_TTS_MODEL
 QINIU_TTS_VOICE
 ```
 
-ASR 使用七牛 Dora 短语音听写：服务端将浏览器上传的音频做标准 Base64 编码，
-以 `audioBase64`、`lang=MANDARIN`、`scene=GENERAL` 调用 `/v2/asr`，并使用
+ASR 使用七牛 Dora 短语音听写：服务端将浏览器上传的音频做标准 Base64 编码， 以
+`audioBase64`、`lang=MANDARIN`、`scene=GENERAL` 调用 `/v2/asr`，并使用
 七牛账户的 AccessKey/SecretKey 生成 QiniuToken。Dora 不返回置信度，因此完美程度
 按规则回退为 100%。Dora AK/SK 与 `sk-` 开头的 AI 大模型 API Key 不是同一种凭据。
 
@@ -435,7 +441,7 @@ web_voice_command
 ## 15. 实施顺序
 
 1. 建立 `web/` Next.js 工程、Supabase 匿名认证和基础布局。
-2. 实现框架无关的 `src/web` 应用服务和公开 DTO。
+2. 实现框架无关的 `src/adapter/http` 应用服务和公开 DTO。
 3. 实现匹配、对局查询、选角和准备 Route Handler。
 4. 使用 Fake SpeechProvider 打通双浏览器完整对局。
 5. 接入七牛 Dora 短语音听写，并验证转写文本和 100% 完美度回退规则。

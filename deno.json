@@ -2,7 +2,7 @@
   "tasks": {
     "dev": "deno run -A src/main.ts",
     "test": "deno test -A src",
-    "test:battle": "deno test -A src/battle",
+    "test:battle": "deno test -A src/engine",
     "sim": "deno run -A scripts/sim_match.ts",
     "sim:battle": "deno run -A scripts/sim_battle_engine.ts",
     "check": "deno fmt --check src scripts supabase/functions && deno lint src scripts supabase/functions && deno test -A src && deno run -A scripts/sim_match.ts",
@@ -10,7 +10,8 @@
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",
-    "pinyin-pro": "npm:pinyin-pro@3.26.0"
+    "pinyin-pro": "npm:pinyin-pro@3.26.0",
+    "postgres": "npm:postgres@3.4.7"
   },
   "lint": {
     "exclude": ["supabase/.temp", "supabase/.branches"]
