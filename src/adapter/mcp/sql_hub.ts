@@ -2,15 +2,9 @@ import { GameEngine, type SayDelivery } from "../../engine/service/game.ts";
 import type { EngineSnapshot } from "../../engine/service/game.ts";
 import { extractJoinCode } from "../../engine/service/game.ts";
 import { deviceKey, type HubCall, type LocalSend } from "./hub.ts";
+import { poolerDatabaseUrl } from "./postgres.ts";
 import { type RpcId, rpcResult } from "./protocol.ts";
 import { absorbPeer, peerIsRelevant, textNeedsRoomLock } from "./room_sync.ts";
-
-class NeedsPeers extends Error {
-  constructor() {
-    super("needs peers");
-    this.name = "NeedsPeers";
-  }
-}
 
 type Sql = {
   begin<T>(fn: (tx: Sql) => Promise<T>): Promise<T>;
@@ -34,6 +28,11 @@ const EMPTY: SayDelivery = {
 };
 
 const CALL_BUDGET_MS = 12000;
+
+type CallOutcome = {
+  body: unknown | null;
+  deliverCaller: boolean;
+};
 
 /** 按设备直接读写 Postgres，不经过 PostgREST，也不 LISTEN。 */
 export class SqlHub {
@@ -92,38 +91,47 @@ export class SqlHub {
     key: string,
   ): Promise<unknown | null> {
     const text = input.command.text ?? "";
-    try {
-      return await this.transact(input, key, textNeedsRoomLock(text));
-    } catch (error) {
-      if (!isNeedsPeers(error)) throw error;
-      return await this.transact(input, key, true);
+    const outcome = await this.transact(
+      input,
+      key,
+      textNeedsRoomLock(text),
+    );
+    if (outcome.deliverCaller && outcome.body !== null) {
+      // 状态事务已提交。调用方句子走 HTTP/SSE，不再占着设备锁等 insert。
+      await this.publish(input.sessionId, outcome.body);
     }
+    return outcome.body;
   }
 
   private async transact(
     input: HubCall,
     key: string,
-    cross: boolean,
-  ): Promise<unknown | null> {
+    crossHint: boolean,
+  ): Promise<CallOutcome> {
     const sql = await this.query();
+    const joinCode = extractJoinCode(input.command.text ?? "");
+    const wantNotices = input.command.tool === "submit_lobby_text";
     return await sql.begin(async (tx) => {
-      await tx`select set_config('lock_timeout', '2000', true)`;
-      await tx`select set_config('statement_timeout', '8000', true)`;
-      if (cross) {
-        await tx`select pg_advisory_xact_lock(hashtext('ly-rooms'))`;
+      if (crossHint) {
+        await tx`
+          select
+            pg_advisory_xact_lock(hashtext('ly-rooms')),
+            pg_advisory_xact_lock(hashtext(${key}))
+        `;
+      } else {
+        await tx`select pg_advisory_xact_lock(hashtext(${key}))`;
       }
-      await tx`select pg_advisory_xact_lock(hashtext(${key}))`;
-      const [row] = await tx<{ state: EngineSnapshot }[]>`
-        select state from ly_device_engine where device_key = ${key}
-      `;
-      const before = row?.state ?? null;
-      const joinCode = extractJoinCode(input.command.text ?? "");
+
+      const boot = await this.loadBoot(tx, key, wantNotices);
+      const before = boot.state;
       const loaded = new Map<string, EngineSnapshot | null>([[key, before]]);
       let merged = before;
-      if (!cross && this.needsPeers(key, before, joinCode)) {
-        throw new NeedsPeers();
+
+      const needPeers = this.needsPeers(key, before, joinCode);
+      if (needPeers && !crossHint) {
+        await tx`select pg_advisory_xact_lock(hashtext('ly-rooms'))`;
       }
-      if (this.needsPeers(key, before, joinCode)) {
+      if (needPeers) {
         const others = await tx<
           { device_key: string; state: EngineSnapshot }[]
         >`
@@ -138,37 +146,18 @@ export class SqlHub {
           merged = absorbPeer(merged, other.device_key, other.state);
         }
       }
+
       const engine = new GameEngine();
       engine.loadState(merged);
       const result = await engine.handle(input.command);
       const next = engine.exportState();
-      const deviceIds = new Set<string>([key]);
-      for (const actor of next.actors) deviceIds.add(actor.deviceId);
-      for (const device of next.devices) deviceIds.add(device.deviceId);
-      for (const deviceId of deviceIds) {
-        const previous = loaded.get(deviceId) ?? null;
-        if (JSON.stringify(previous) === JSON.stringify(next)) continue;
-        await tx`
-          insert into ly_device_engine (device_key, state, updated_at)
-          values (${deviceId}, ${tx.json(next)}, now())
-          on conflict (device_key) do update
-          set state = excluded.state, updated_at = excluded.updated_at
-        `;
+      await this.saveChanged(tx, key, loaded, next);
+
+      if (result.caller && wantNotices && boot.notices.length > 0) {
+        result.caller.say = `${boot.notices.join("")}${result.caller.say}`;
+        if (result.caller.phase === "LOBBY") result.caller.wait = true;
       }
-      if (
-        result.caller && input.command.tool === "submit_lobby_text"
-      ) {
-        const notices = await this.takeNotices(tx, key);
-        if (notices.length > 0) {
-          result.caller.say = `${notices.join("")}${result.caller.say}`;
-          if (result.caller.phase === "LOBBY") result.caller.wait = true;
-        }
-      }
-      let body: unknown | null = null;
-      if (result.caller) {
-        body = rpcResult(input.rpcId, result.caller);
-        await this.deliver(tx, input.sessionId, body);
-      }
+
       for (const push of result.pushes) {
         await this.route(
           tx,
@@ -176,21 +165,95 @@ export class SqlHub {
           push.delivery,
         );
       }
+
       if (!result.caller && input.command.tool === "wait_event") {
-        await this.park(
-          tx,
-          key,
-          input.sessionId,
-          input.rpcId,
-        );
-        return null;
+        await this.park(tx, key, input.sessionId, input.rpcId);
+        return { body: null, deliverCaller: false };
       }
-      if (!result.caller) {
-        body = rpcResult(input.rpcId, EMPTY);
-        await this.deliver(tx, input.sessionId, body);
+
+      if (result.caller) {
+        return {
+          body: rpcResult(input.rpcId, result.caller),
+          deliverCaller: true,
+        };
       }
-      return body;
+      return {
+        body: rpcResult(input.rpcId, EMPTY),
+        deliverCaller: true,
+      };
     });
+  }
+
+  private async loadBoot(
+    tx: Sql,
+    key: string,
+    wantNotices: boolean,
+  ): Promise<{ state: EngineSnapshot | null; notices: string[] }> {
+    if (!wantNotices) {
+      const [row] = await tx<{ state: EngineSnapshot }[]>`
+        select state from ly_device_engine where device_key = ${key}
+      `;
+      return { state: row?.state ?? null, notices: [] };
+    }
+    const [row] = await tx<{
+      state: EngineSnapshot | null;
+      notices: SayDelivery[];
+    }[]>`
+      with self as (
+        select state from ly_device_engine where device_key = ${key}
+      ),
+      removed as (
+        delete from ly_mcp_pending
+        where device_key = ${key}
+        returning id, body
+      )
+      select
+        (select state from self) as state,
+        coalesce(
+          (select json_agg(body order by id) from removed),
+          '[]'::json
+        ) as notices
+    `;
+    const notices = (row?.notices ?? []).flatMap((body) =>
+      body?.say.includes("对手") ? [body.say] : []
+    );
+    return { state: row?.state ?? null, notices };
+  }
+
+  private async saveChanged(
+    tx: Sql,
+    key: string,
+    loaded: Map<string, EngineSnapshot | null>,
+    next: EngineSnapshot,
+  ): Promise<void> {
+    const deviceIds = new Set<string>([key]);
+    for (const actor of next.actors) deviceIds.add(actor.deviceId);
+    for (const device of next.devices) deviceIds.add(device.deviceId);
+    const dirty: string[] = [];
+    for (const deviceId of deviceIds) {
+      const previous = loaded.get(deviceId) ?? null;
+      if (JSON.stringify(previous) === JSON.stringify(next)) continue;
+      dirty.push(deviceId);
+    }
+    if (dirty.length === 0) return;
+    if (dirty.length === 1) {
+      const deviceId = dirty[0]!;
+      await tx`
+        insert into ly_device_engine (device_key, state, updated_at)
+        values (${deviceId}, ${tx.json(next)}, now())
+        on conflict (device_key) do update
+        set state = excluded.state, updated_at = excluded.updated_at
+      `;
+      return;
+    }
+    for (const deviceId of dirty) {
+      await tx`
+        insert into ly_device_engine (device_key, state, updated_at)
+        values (${deviceId}, ${tx.json(next)}, now())
+        on conflict (device_key) do update
+        set state = excluded.state, updated_at = excluded.updated_at
+      `;
+    }
   }
 
   private needsPeers(
@@ -204,26 +267,6 @@ export class SqlHub {
       state.actors.some((actor) =>
         actor.mode === "ONLINE" && actor.deviceId !== key
       );
-  }
-
-  private async takeNotices(tx: Sql, key: string): Promise<string[]> {
-    const rows = await tx<{ body: SayDelivery }[]>`
-      with doomed as (
-        select id from ly_mcp_pending
-        where device_key = ${key}
-        order by id
-      ),
-      removed as (
-        delete from ly_mcp_pending as pending
-        using doomed
-        where pending.id = doomed.id
-        returning pending.id, pending.body
-      )
-      select body from removed order by id
-    `;
-    return rows.flatMap((row) =>
-      row.body?.say.includes("对手") ? [row.body.say] : []
-    );
   }
 
   private async deliver(
@@ -355,10 +398,11 @@ export class SqlHub {
   private async query(): Promise<Sql> {
     if (this.sql) return this.sql;
     const { default: postgres } = await import("postgres");
-    const ssl = this.databaseUrl.includes("sslmode=disable")
+    const databaseUrl = poolerDatabaseUrl(this.databaseUrl);
+    const ssl = databaseUrl.includes("sslmode=disable")
       ? false
       : "require" as const;
-    this.sql = postgres(this.databaseUrl, {
+    this.sql = postgres(databaseUrl, {
       max: 1,
       ssl,
       idle_timeout: 20,
@@ -378,17 +422,6 @@ export class SqlHub {
     `;
     for (const row of rows) this.send(sessionId, row.body);
   }
-}
-
-function isNeedsPeers(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
-    if (current instanceof NeedsPeers || current.name === "NeedsPeers") {
-      return true;
-    }
-    current = current.cause;
-  }
-  return false;
 }
 
 function restoreRpcId(value: string): RpcId {
