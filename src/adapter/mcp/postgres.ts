@@ -252,7 +252,11 @@ export function listenDatabaseUrl(raw: string): string {
   return raw.replace(":6543/", ":5432/");
 }
 
-/** 短事务走事务池，避免每次冷连接直连 5432。LISTEN 仍用 listenDatabaseUrl。 */
+/**
+ * 短事务应使用事务池 URI（host 多为 *.pooler.supabase.com，端口 6543）。
+ * 若误传了直连 5432，只改端口；免费项目上 db.*.supabase.co:6543 未必可用，
+ * 生产请把 DATABASE_URL 设成 Connect 对话框里的 Transaction pooler。
+ */
 export function poolerDatabaseUrl(raw: string): string {
   return raw.replace(":5432/", ":6543/");
 }
