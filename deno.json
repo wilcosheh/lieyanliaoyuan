@@ -2,7 +2,7 @@
   "tasks": {
     "dev": "deno run -A src/main.ts",
     "test": "deno test -A src",
-    "test:battle": "deno test -A src/battle",
+    "test:battle": "deno test -A src/engine",
     "sim": "deno run -A scripts/sim_match.ts",
     "sim:battle": "deno run -A scripts/sim_battle_engine.ts",
     "check": "deno fmt --check src scripts supabase/functions && deno lint src scripts supabase/functions && deno test -A src && deno run -A scripts/sim_match.ts",

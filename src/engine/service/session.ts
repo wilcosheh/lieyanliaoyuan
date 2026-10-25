@@ -4,14 +4,14 @@ import {
   type ControllerOptions,
   type RuleErrorCode,
   type SubmitActionInput,
-} from "./controller.ts";
+} from "../rules/controller.ts";
 import {
   BattleAlreadyExistsError,
   type BattleRecord,
   type BattleRepository,
   BattleVersionConflictError,
-} from "./repository.ts";
-import type { BattleEvent, BattleState } from "./state.ts";
+} from "../store/repository.ts";
+import type { BattleEvent, BattleState } from "../rules/state.ts";
 
 export type SessionErrorCode =
   | "BATTLE_NOT_FOUND"
@@ -157,6 +157,18 @@ export class BattleSessionService {
     return await this.mutate(
       battleId,
       (controller) => controller.advance(),
+      guard,
+    );
+  }
+
+  async concede(
+    battleId: string,
+    playerId: string,
+    guard: MutationGuard = {},
+  ): Promise<BattleSessionResponse> {
+    return await this.mutate(
+      battleId,
+      (controller) => controller.concede(playerId),
       guard,
     );
   }

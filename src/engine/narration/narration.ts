@@ -1,5 +1,5 @@
-import type { BattleEvent, BattleState } from "../battle/state.ts";
-import { CHARACTERS } from "../battle/skills.ts";
+import { CHARACTERS } from "../characters/skills.ts";
+import type { BattleEvent, BattleState } from "../rules/state.ts";
 
 export function narrateEvent(event: BattleEvent, state: BattleState): string {
   const player = state.players.find((item) => item.playerId === event.playerId);

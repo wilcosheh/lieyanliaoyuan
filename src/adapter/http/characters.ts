@@ -1,4 +1,4 @@
-import { CHARACTERS } from "../battle/skills.ts";
+import { CHARACTERS } from "../../engine/characters/skills.ts";
 import type { WebCharacterView } from "./dto.ts";
 
 const metadata: Record<

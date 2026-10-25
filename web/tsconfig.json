@@ -40,8 +40,9 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "../src/web/**/*.ts",
-    "../src/battle/**/*.ts",
+    "../src/adapter/http/**/*.ts",
+    "../src/engine/**/*.ts",
+    "../src/speech/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [

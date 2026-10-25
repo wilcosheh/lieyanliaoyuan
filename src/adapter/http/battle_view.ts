@@ -1,5 +1,11 @@
-import type { BattleState, PlayerBattleState } from "../battle/state.ts";
-import { CHARACTERS, type SkillConfig } from "../battle/skills.ts";
+import {
+  CHARACTERS,
+  type SkillConfig,
+} from "../../engine/characters/skills.ts";
+import type {
+  BattleState,
+  PlayerBattleState,
+} from "../../engine/rules/state.ts";
 import type { WebBattleView, WebPlayerView, WebSkillView } from "./dto.ts";
 
 const unavailableMessages: Record<string, string> = {

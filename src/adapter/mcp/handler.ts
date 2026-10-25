@@ -4,7 +4,7 @@ import {
   PRACTICE_PROMPT,
   REVIEW_PROMPT,
   type RpcId,
-} from "../game/logic.ts";
+} from "../../game/logic.ts";
 import { type ChantLookup, linxLookup } from "./audio.ts";
 import { isSfxName, synthWav } from "./sfx.ts";
 import { MemoryStore, type Store } from "./store.ts";

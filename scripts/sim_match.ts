@@ -1,6 +1,6 @@
-import { handle, type ServerCtx } from "../src/mcp/handler.ts";
-import type { ChantLookup } from "../src/mcp/audio.ts";
-import { MemoryStore } from "../src/mcp/store.ts";
+import type { ChantLookup } from "../src/adapter/mcp/audio.ts";
+import { handle, type ServerCtx } from "../src/adapter/mcp/handler.ts";
+import { MemoryStore } from "../src/adapter/mcp/store.ts";
 
 type Rpc = {
   id?: number | string | null;

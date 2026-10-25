@@ -11,7 +11,7 @@ import {
   type SkillConfig,
   type SkillEffect,
   validateCharacterConfig,
-} from "./skills.ts";
+} from "../characters/skills.ts";
 
 export type RuleErrorCode =
   | "BATTLE_NOT_PREPARING"
@@ -381,6 +381,36 @@ export class BattleController {
       return this.success(start);
     }
     return this.reject(start, "ROUND_NOT_WAITING");
+  }
+
+  concede(playerId: string): BattleResponse {
+    const start = this.startEventIndex();
+    if (this.state.status !== "RUNNING") {
+      return this.reject(
+        start,
+        this.state.status === "FINISHED"
+          ? "BATTLE_ALREADY_FINISHED"
+          : "BATTLE_NOT_RUNNING",
+        playerId,
+      );
+    }
+    const player = this.machine.getPlayer(playerId);
+    if (!player) return this.reject(start, "PLAYER_NOT_FOUND", playerId);
+    if (!player.alive) return this.reject(start, "ACTOR_DEAD", playerId);
+    const round = this.state.currentRound;
+    if (
+      round && (round.status === "SETTLING" || round.status === "ENDING")
+    ) {
+      return this.reject(start, "ROUND_NOT_WAITING", playerId);
+    }
+    const opponent = this.machine.getOpponent(playerId);
+    this.finishBattle(
+      opponent?.playerId ?? null,
+      round?.roundNo ?? 0,
+      "SURRENDER",
+      playerId,
+    );
+    return this.success(start);
   }
 
   archiveBattle(): BattleResponse {

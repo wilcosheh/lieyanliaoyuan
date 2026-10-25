@@ -1,4 +1,4 @@
-import { createDefaultCtx, handle } from "../../../src/mcp/handler.ts";
+import { createDefaultCtx, handle } from "../../../src/adapter/mcp/handler.ts";
 
 const ctx = createDefaultCtx();
 

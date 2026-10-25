@@ -1,12 +1,12 @@
-import type { BattleSessionResponse } from "../battle/session.ts";
-import { BattleSessionService } from "../battle/session.ts";
+import type { BattleSessionResponse } from "../../engine/service/session.ts";
+import { BattleSessionService } from "../../engine/service/session.ts";
 import type { VoiceActionResult, WebBattleView } from "./dto.ts";
 import { toWebBattleView } from "./battle_view.ts";
 import type {
   SpeechProvider,
   SpeechRecognitionResult,
-} from "./speech/provider.ts";
-import { normalizeSkillTranscript } from "./speech/provider.ts";
+} from "../../speech/provider.ts";
+import { normalizeSkillTranscript } from "../../speech/provider.ts";
 import type {
   VoiceCommandRecord,
   WebLobbyRepository,
@@ -150,10 +150,12 @@ export class WebBattleApplication {
     return await this.submitRecognition(input, claimed, recognition);
   }
 
-  async submitRecognizedAction(input: ActionIdentity & {
-    transcript: string;
-    confidence?: number;
-  }): Promise<VoiceActionResult> {
+  async submitRecognizedAction(
+    input: ActionIdentity & {
+      transcript: string;
+      confidence?: number;
+    },
+  ): Promise<VoiceActionResult> {
     await this.assertMember(input.battleId, input.playerId);
     const transcript = input.transcript.trim();
     if (!transcript || transcript.length > 100) {
@@ -191,7 +193,9 @@ export class WebBattleApplication {
       input.commandId,
     );
     if (existing) {
-      return { replay: await this.replayVoiceCommand(existing, input.playerId) };
+      return {
+        replay: await this.replayVoiceCommand(existing, input.playerId),
+      };
     }
     const initial = await this.battles.getBattle(input.battleId);
     if (!initial.ok) this.throwBattleError(initial);
