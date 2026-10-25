@@ -1,0 +1,32 @@
+# 定时打 game/health，压 Edge 冷启动。需要仓库 Secrets：
+#   SUPABASE_PROJECT_REF、MCP_CONNECTION_KEY
+name: edge-warmup
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Warm game function
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          MCP_CONNECTION_KEY: ${{ secrets.MCP_CONNECTION_KEY }}
+        run: |
+          if [ -z "${SUPABASE_PROJECT_REF:-}" ] || [ -z "${MCP_CONNECTION_KEY:-}" ]; then
+            echo "缺少 SUPABASE_PROJECT_REF 或 MCP_CONNECTION_KEY，跳过"
+            exit 0
+          fi
+          url="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/game/health"
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "authorization: Bearer ${MCP_CONNECTION_KEY}" \
+            "$url" || echo "000")
+          echo "health http=$code"
+          test "$code" = "200"

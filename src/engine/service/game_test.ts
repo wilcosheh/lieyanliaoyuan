@@ -57,7 +57,7 @@ Deno.test("versus cpu opens on one countdown sentence and resolves the first cas
     "submit_lobby_text",
     "选烈焰剑士",
   );
-  assertEquals(selected.caller?.say, "已选烈焰剑士。");
+  assertEquals(selected.caller?.say, "已选烈焰剑士。说准备开战。");
 
   const ready = await call(game, "d1", "c3", "submit_lobby_text", "准备");
   assertEquals(
@@ -477,6 +477,30 @@ Deno.test("加入房间，房间号6993 joins instead of rereading the host scri
   assertEquals(absent.caller?.wait, false);
 });
 
+Deno.test("guest re-join while already seated re-notifies the host", async () => {
+  const game = engine({ value: 0 });
+  await call(game, "host", "c1", "submit_lobby_text", "开房间");
+  const joined = await call(
+    game,
+    "guest",
+    "c2",
+    "submit_lobby_text",
+    "加入房间，房间号1234。",
+  );
+  assertEquals(joined.caller?.say, "已加入。请选角色并准备。");
+  assertEquals(joined.pushes[0]?.delivery.say.includes("对手来了"), true);
+
+  const again = await call(
+    game,
+    "guest",
+    "c3",
+    "submit_lobby_text",
+    "加入房间，房间号1234。",
+  );
+  assertEquals(again.caller?.say.includes("已经在房间里"), true);
+  assertEquals(again.pushes[0]?.delivery.say, "对手来了。请选角色并准备。");
+});
+
 Deno.test("practice does not wait for an opponent", async () => {
   const game = engine({ value: 0 });
   const needRole = await call(game, "d1", "c1", "submit_lobby_text", "练习");
@@ -596,7 +620,7 @@ Deno.test("engine snapshot restores the selected character and the room", async 
     "submit_lobby_text",
     "烈焰剑士",
   );
-  assertEquals(replay.caller?.say, "已选烈焰剑士。");
+  assertEquals(replay.caller?.say, "已选烈焰剑士。说准备开战。");
   const joined = await call(
     restored,
     "guest",
@@ -712,6 +736,72 @@ Deno.test("disconnect longer than 10s forfeits and a shorter gap says 回来了"
   assertEquals(forfeited.caller?.say.includes("你输了。"), true);
 });
 
+Deno.test("review hello goes to lobby instead of replaying the loss", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  const countdown = await call(game, "d1", "c3a", "ack_playback");
+  assertEquals(countdown.caller?.say, "三。二。一。");
+  now.value += 3_000;
+  const lost = await call(game, "d1", "c4", "submit_utterance", "投降");
+  assertEquals(lost.caller?.phase, "REVIEW");
+  assertEquals(lost.caller?.say.includes("你输了。"), true);
+
+  const hello = await call(game, "d1", "c5", "submit_lobby_text", "你好");
+  assertEquals(hello.caller?.say.includes("你输了"), false);
+  assertEquals(hello.caller?.say.includes("说角色名开始"), true);
+  assertEquals(hello.caller?.phase, "LOBBY");
+
+  const again = await call(game, "d1", "c6", "submit_lobby_text", "再来一局");
+  assertEquals(again.caller?.say.includes("双方各"), true);
+});
+
+Deno.test("review character via submit_utterance goes to lobby", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  await call(game, "d1", "c3a", "ack_playback");
+  now.value += 3_000;
+  const lost = await call(game, "d1", "c4", "submit_utterance", "投降");
+  assertEquals(lost.caller?.phase, "REVIEW");
+
+  // 模型常把选角误走 submit_utterance，不能再念「你输了」。
+  const picked = await call(game, "d1", "c5", "submit_utterance", "圣光守卫");
+  assertEquals(picked.caller?.say.includes("你输了"), false);
+  assertEquals(picked.caller?.say.includes("已选圣光守卫"), true);
+  assertEquals(picked.caller?.phase, "LOBBY");
+});
+
+Deno.test("open room after review leaves wait_event for the opponent", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  await call(game, "host", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "host", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "host", "c3", "submit_lobby_text", "准备");
+  await call(game, "host", "c3a", "ack_playback");
+  now.value += 3_000;
+  const lost = await call(game, "host", "c4", "submit_utterance", "投降");
+  assertEquals(lost.caller?.phase, "REVIEW");
+
+  const opened = await call(
+    game,
+    "host",
+    "c5",
+    "submit_lobby_text",
+    "创建房间",
+  );
+  assertEquals(opened.caller?.say.includes("把号码告诉对手"), true);
+  assertEquals(opened.caller?.phase, "LOBBY");
+  assertEquals(opened.caller?.wait, true);
+
+  const waiting = await call(game, "host", "c6", "wait_event");
+  assertEquals(waiting.caller, null);
+});
+
 Deno.test("online cast, interrupt and surrender are spoken to both sides", async () => {
   const now = { value: 1_000 };
   const game = engine(now);
@@ -792,7 +882,7 @@ Deno.test("replay returns the committed sentence and ignores an unseen command",
     tool: "submit_lobby_text",
     text: "烈焰剑士",
   });
-  assertEquals(heard?.say, "已选烈焰剑士。");
+  assertEquals(heard?.say, "已选烈焰剑士。说准备开战。");
   assertEquals(
     copy.replay({
       deviceId: "d1",

@@ -243,6 +243,23 @@ function wantsLeaveBattle(text: string): boolean {
     extractCharacterName(text) !== null;
 }
 
+/** 复盘里误走 submit_utterance 的大厅口令，改走 lobby；看血等仍念胜负句。 */
+function wantsLobbyFromReview(text: string): boolean {
+  if (!text) return false;
+  if (
+    text === "再来一局" || text === "复盘" || text === "从头复盘" ||
+    text === "你好"
+  ) return true;
+  if (
+    wantsOpenRoom(text) || wantsVersusCpu(text) || wantsPractice(text) ||
+    wantsReady(text) || wantsLooseStart(text) || wantsCharacterList(text) ||
+    wantsLeaveRoom(text)
+  ) return true;
+  if (extractCharacterName(text) !== null) return true;
+  if (extractJoinCode(text) !== null) return true;
+  return false;
+}
+
 function parsePerfection(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isFinite(value) || value < 0 || value > 100) return value;
@@ -382,19 +399,25 @@ export class GameEngine {
       );
     }
     const actor = this.actor(command, device);
-    const signature = `${command.tool}\n${normalize(command.text)}`;
+    // 复盘里模型常把选角/开房误走 submit_utterance；大厅口令改走 lobby。
+    const routed: EngineCommand =
+      actor.phase === "REVIEW" && command.tool === "submit_utterance" &&
+        wantsLobbyFromReview(normalize(command.text))
+        ? { ...command, tool: "submit_lobby_text" }
+        : command;
+    const signature = `${routed.tool}\n${normalize(routed.text)}`;
     const idempotencyKey = actor.battleId
-      ? `${actor.battleId}:${command.commandId}`
-      : `${actor.playerId}:${command.commandId}`;
+      ? `${actor.battleId}:${routed.commandId}`
+      : `${actor.playerId}:${routed.commandId}`;
     const cached = this.seen.get(idempotencyKey);
     if (cached) {
       if (cached.signature === signature) return cached.result;
       return this.finish(this.delivery(actor, "COMMAND_ALREADY_PROCESSED", ""));
     }
-    if (!ALLOWED[actor.phase].includes(command.tool)) {
-      const text = normalize(command.text);
+    if (!ALLOWED[actor.phase].includes(routed.tool)) {
+      const text = normalize(routed.text);
       if (
-        actor.phase === "BATTLE" && command.tool === "submit_lobby_text" &&
+        actor.phase === "BATTLE" && routed.tool === "submit_lobby_text" &&
         actor.mode !== "ONLINE" && wantsLeaveBattle(text)
       ) {
         actor.phase = "LOBBY";
@@ -402,7 +425,7 @@ export class GameEngine {
         actor.casting = false;
         actor.mode = null;
       } else if (
-        actor.phase === "BATTLE" && command.tool === "submit_lobby_text"
+        actor.phase === "BATTLE" && routed.tool === "submit_lobby_text"
       ) {
         return this.remember(
           idempotencyKey,
@@ -414,7 +437,7 @@ export class GameEngine {
           ),
         );
       } else if (
-        actor.phase === "REVIEW" && command.tool === "submit_utterance"
+        actor.phase === "REVIEW" && routed.tool === "submit_utterance"
       ) {
         return this.remember(
           idempotencyKey,
@@ -429,14 +452,15 @@ export class GameEngine {
         );
       }
     }
-    const presence = this.notePresence(actor, command);
+    const presence = this.notePresence(actor, routed);
     if (actor.phase === "BATTLE") {
       // 断线任何命令都判。电脑结算不放在出招前，否则这句会被收成「三。二。一。」。
-      const settleCpu = command.tool === "wait_event" ||
-        command.tool === "ack_playback";
+      const settleCpu = routed.tool === "wait_event" ||
+        routed.tool === "ack_playback";
       await this.refresh(actor, settleCpu);
     }
-    if (actor.phase === "REVIEW") {
+    // 复盘只把 wait/ack 收成胜负句。大厅口令（你好、再来一局、练习…）要进 lobby。
+    if (actor.phase === "REVIEW" && routed.tool !== "submit_lobby_text") {
       return this.remember(
         idempotencyKey,
         signature,
@@ -449,7 +473,7 @@ export class GameEngine {
       status.say = `回来了。${status.say}`;
       return this.remember(idempotencyKey, signature, status);
     }
-    const caller = await this.dispatch(actor, device, command);
+    const caller = await this.dispatch(actor, device, routed);
     return this.remember(idempotencyKey, signature, caller);
   }
 
@@ -604,6 +628,12 @@ export class GameEngine {
       status: "OPEN",
     });
     device.roomCode = code;
+    // 上一局 REVIEW 必须清掉，否则 wait_event 还会念「你输了」。
+    actor.phase = "LOBBY";
+    actor.battleId = null;
+    actor.casting = false;
+    actor.wasInterrupted = false;
+    actor.rematch = false;
     actor.mode = "ONLINE";
     // 等对手：需要 wait_event
     return this.delivery(actor, "ACCEPTED", roomSay(code));
@@ -679,6 +709,28 @@ export class GameEngine {
           `${roomSay(joinCode)}你是房主。对手要换一台设备加入。`,
         );
       }
+      // 本机以为在房里，但快照里还不是客人：多半是房主重开了同号房，补一次加入。
+      if (
+        room &&
+        room.status === "OPEN" &&
+        room.hostKey !== actor.key &&
+        room.guestKey !== actor.key
+      ) {
+        device.roomCode = null;
+        if (actor.mode === "ONLINE") actor.mode = null;
+        actor.battleId = null;
+        return await this.joinRoom(actor, device, joinCode, terminal);
+      }
+      // 已是客人再念加入：提醒自己，并补推房主（防止上次通知丢掉）。
+      if (room?.guestKey === actor.key) {
+        const host = this.actors.get(room.hostKey);
+        if (host) {
+          this.side(
+            host,
+            this.delivery(host, "ACCEPTED", "对手来了。请选角色并准备。"),
+          );
+        }
+      }
       return this.speak(
         actor,
         "已经在房间里。请选角色并准备。要离开就说退出。",
@@ -738,6 +790,7 @@ export class GameEngine {
     if (room) this.rooms.delete(room.code);
     device.roomCode = null;
     if (actor.mode === "ONLINE") actor.mode = null;
+    actor.phase = "LOBBY";
     actor.battleId = null;
     if (other && other.key !== actor.key) {
       const otherDevice = this.devices.get(other.deviceId);
@@ -800,7 +853,7 @@ export class GameEngine {
       return this.speak(actor, `${label}已选${name}。`);
     }
     if (actor.pendingPractice) return this.startPractice(actor);
-    return this.speak(actor, `已选${name}。`);
+    return this.speak(actor, `已选${name}。说准备开战。`);
   }
 
   private async ready(actor: Actor): Promise<SayDelivery> {

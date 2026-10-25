@@ -1,6 +1,15 @@
 import { assertEquals } from "@std/assert";
 import { GameEngine } from "../../engine/service/game.ts";
-import { createMcpServer } from "./server.ts";
+import { createMcpServer, parseWaitHoldMs } from "./server.ts";
+
+Deno.test("parseWaitHoldMs defaults and clamps", () => {
+  assertEquals(parseWaitHoldMs(undefined), 10_000);
+  assertEquals(parseWaitHoldMs(""), 10_000);
+  assertEquals(parseWaitHoldMs("8000"), 8_000);
+  assertEquals(parseWaitHoldMs("500"), 10_000);
+  assertEquals(parseWaitHoldMs("20000"), 10_000);
+  assertEquals(parseWaitHoldMs("nope"), 10_000);
+});
 
 async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,

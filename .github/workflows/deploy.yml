@@ -58,8 +58,10 @@ jobs:
           LINX_API_KEY: ${{ secrets.LINX_API_KEY }}
           LINX_API_BASE: ${{ secrets.LINX_API_BASE }}
         run: |
+          # wait_event 挂起短于灵矽掐断；可用 WAIT_HOLD_MS 覆盖（1s–14s）。
           supabase secrets set \
-            PUBLIC_BASE_URL="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/game/mcp"
+            PUBLIC_BASE_URL="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/game/mcp" \
+            WAIT_HOLD_MS="10000"
           if [ -n "${LINX_API_KEY:-}" ]; then
             supabase secrets set \
               LINX_API_KEY="$LINX_API_KEY" \
