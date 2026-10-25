@@ -25,7 +25,7 @@ test("两个独立浏览器完成匹配、准备和浏览器语音出招", async
               resultIndex: 0,
               results: {
                 0: {
-                  0: { transcript: "破风斩", confidence: 0.9 },
+                  0: { transcript: "疾风剑", confidence: 0.9 },
                   length: 1,
                 },
                 length: 1,
@@ -82,7 +82,7 @@ test("两个独立浏览器完成匹配、准备和浏览器语音出招", async
   await cast.dispatchEvent("pointerdown");
   await expect(first.getByText("正在聆听")).toBeVisible();
   await cast.dispatchEvent("pointerup");
-  await expect(first.getByText("破风斩 · 90%")).toBeVisible();
+  await expect(first.getByText("疾风剑 · 90%")).toBeVisible();
   await expect(first.getByText("ROUND").locator("..")).toContainText("2");
 
   await firstContext.close();

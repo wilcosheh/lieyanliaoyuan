@@ -18,7 +18,7 @@ describe("QiniuSpeechProvider", () => {
         rtn: 0,
         message: "success",
         requestId: "req",
-        resultText: "破风斩",
+        resultText: "疾风剑",
       })),
     );
     const result = await provider(request).recognize({
@@ -27,7 +27,7 @@ describe("QiniuSpeechProvider", () => {
     });
 
     expect(result).toEqual({
-      transcript: "破风斩",
+      transcript: "疾风剑",
       perfection: 100,
       confidenceSource: "fallback",
       providerRequestId: "req",

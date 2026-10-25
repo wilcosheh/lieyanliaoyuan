@@ -28,6 +28,17 @@ class QueueSpeechProvider implements SpeechProvider {
   }
 }
 
+class OneHpBattleSessionService extends BattleSessionService {
+  override createBattle(
+    input: Parameters<BattleSessionService["createBattle"]>[0],
+  ) {
+    return super.createBattle({
+      ...input,
+      options: { ...input.options, maxHp: 1 },
+    });
+  }
+}
+
 async function setup(provider: SpeechProvider, bothCharacter = "swordsman") {
   const repository = new InMemoryBattleRepository();
   const battles = new BattleSessionService(repository);
@@ -46,7 +57,7 @@ async function setup(provider: SpeechProvider, bothCharacter = "swordsman") {
   return { app, battles, lobby, battleId };
 }
 
-const perfect = (transcript = "破风斩"): SpeechRecognitionResult => ({
+const perfect = (transcript = "疾风剑"): SpeechRecognitionResult => ({
   transcript,
   perfection: 90,
   confidenceSource: "provider",
@@ -64,7 +75,7 @@ describe("WebBattleApplication", () => {
       audio: new Uint8Array([1, 2]),
       contentType: "audio/wav",
     });
-    expect(result.transcript).toBe("破风斩");
+    expect(result.transcript).toBe("疾风剑");
     expect(result.perfection).toBe(90);
     expect(result.battle.roundNo).toBe(2);
     expect(result.battle.roundStatus).toBe("WAITING_COMMAND");
@@ -82,10 +93,10 @@ describe("WebBattleApplication", () => {
       playerId: "player-a",
       commandId: crypto.randomUUID(),
       roundNo: 1,
-      transcript: " 破 风 斩。 ",
+      transcript: " 疾 风 剑。 ",
       confidence: 0.9,
     });
-    expect(result.transcript).toBe("破 风 斩。");
+    expect(result.transcript).toBe("疾 风 剑。");
     expect(result.perfection).toBe(90);
     expect(result.confidenceSource).toBe("provider");
     expect(result.battle.roundNo).toBe(2);
@@ -101,11 +112,11 @@ describe("WebBattleApplication", () => {
       playerId: "player-a",
       commandId: crypto.randomUUID(),
       roundNo: 1,
-      transcript: "破风站。",
+      transcript: "疾风箭。",
       confidence: 0.9,
     })).rejects.toMatchObject({
       code: "ASR_FAILED",
-      details: { transcript: "破风站。" },
+      details: { transcript: "疾风箭。" },
     });
     expect((await app.getBattle(battleId, "player-a")).roundNo).toBe(1);
   });
@@ -118,7 +129,7 @@ describe("WebBattleApplication", () => {
       playerId: "player-a",
       commandId: crypto.randomUUID(),
       roundNo: 1,
-      transcript: "破风斩",
+      transcript: "疾风剑",
       confidence: 1.01,
     })).rejects.toMatchObject({ code: "INVALID_CONFIDENCE" });
     const result = await app.submitRecognizedAction({
@@ -126,7 +137,7 @@ describe("WebBattleApplication", () => {
       playerId: "player-a",
       commandId: crypto.randomUUID(),
       roundNo: 1,
-      transcript: "破风斩",
+      transcript: "疾风剑",
     });
     expect(result.perfection).toBe(100);
     expect(result.confidenceSource).toBe("fallback");
@@ -242,5 +253,38 @@ describe("WebBattleApplication", () => {
     await expect(app.cancelMatch(ticket.id, "single")).rejects.toMatchObject({
       code: "MATCH_CANNOT_CANCEL",
     });
+  });
+
+  it("结束对局后再次匹配不会复用旧对局", async () => {
+    const battles = new OneHpBattleSessionService(
+      new InMemoryBattleRepository(),
+    );
+    const lobby = new InMemoryWebLobbyRepository();
+    const app = new WebBattleApplication(
+      battles,
+      lobby,
+      new QueueSpeechProvider([perfect()]),
+    );
+    await app.joinMatch("player-a", "甲");
+    const second = await app.joinMatch("player-b", "乙");
+    const battleId = second.battleId!;
+    await app.selectCharacter(battleId, "player-a", "swordsman");
+    await app.selectCharacter(battleId, "player-b", "swordsman");
+    await app.setReady(battleId, "player-a", true);
+    await app.setReady(battleId, "player-b", true);
+    const finished = await app.submitRecognizedAction({
+      battleId,
+      playerId: "player-a",
+      commandId: crypto.randomUUID(),
+      roundNo: 1,
+      transcript: "疾风剑",
+    });
+    expect(finished.battle.status).toBe("FINISHED");
+
+    const waiting = await app.joinMatch("player-a", "甲-新局");
+    expect(waiting.status).toBe("WAITING");
+    const rematch = await app.joinMatch("player-b", "乙-新局");
+    expect(rematch.status).toBe("MATCHED");
+    expect(rematch.battleId).not.toBe(battleId);
   });
 });

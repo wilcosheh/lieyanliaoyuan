@@ -111,7 +111,7 @@ export const CHARACTERS: CharacterConfig[] = [
     id: "swordsman",
     name: "烈焰剑士",
     skills: [
-      basic("swordsman_basic", "破风斩", 65),
+      basic("swordsman_basic", "疾风剑", 65),
       once("swordsman_thrust", "锐刃突刺", "SHORT", [
         { type: "DAMAGE", amount: 80 },
       ]),

@@ -35,7 +35,7 @@ describe("toWebBattleView", () => {
       playerId: "a",
       commandId: "one",
       roundNo: 1,
-      skillText: "破风斩",
+      skillText: "疾风剑",
     });
     controller.advance();
     controller.advance();

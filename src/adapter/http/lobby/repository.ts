@@ -29,6 +29,8 @@ export interface WebLobbyRepository {
     playerId: string,
   ): Promise<MatchTicketRecord | null>;
   cancelTicket(ticketId: string, playerId: string): Promise<boolean>;
+  /** 结束已完成对局对应的匹配票据，允许玩家再次匹配。 */
+  releaseMatchTicket(ticketId: string, playerId: string): Promise<boolean>;
   isBattleMember(battleId: string, playerId: string): Promise<boolean>;
   getBattleNicknames(battleId: string): Promise<Record<string, string>>;
   claimVoiceCommand(
@@ -112,6 +114,15 @@ export class InMemoryWebLobbyRepository implements WebLobbyRepository {
     const record = this.tickets.get(ticketId);
     if (
       !record || record.playerId !== playerId || record.status !== "WAITING"
+    ) return Promise.resolve(false);
+    record.status = "CANCELLED";
+    return Promise.resolve(true);
+  }
+
+  releaseMatchTicket(ticketId: string, playerId: string): Promise<boolean> {
+    const record = this.tickets.get(ticketId);
+    if (
+      !record || record.playerId !== playerId || record.status !== "MATCHED"
     ) return Promise.resolve(false);
     record.status = "CANCELLED";
     return Promise.resolve(true);

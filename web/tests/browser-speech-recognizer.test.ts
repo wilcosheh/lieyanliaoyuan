@@ -49,13 +49,13 @@ describe("BrowserSpeechRecognizer", () => {
     recognition.onresult?.({
       resultIndex: 0,
       results: {
-        0: { 0: { transcript: " 破风斩 ", confidence: 0.91 }, length: 1 },
+        0: { 0: { transcript: " 疾风剑 ", confidence: 0.91 }, length: 1 },
         length: 1,
       },
     });
     expect(onStart).toHaveBeenCalledOnce();
     expect(onResult).toHaveBeenCalledWith({
-      transcript: "破风斩",
+      transcript: "疾风剑",
       confidence: 0.91,
     });
     expect(onError).not.toHaveBeenCalled();
