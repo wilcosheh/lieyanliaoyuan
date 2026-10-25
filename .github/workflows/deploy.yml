@@ -6,6 +6,8 @@
 #   SUPABASE_PROJECT_REF
 #   SUPABASE_DB_PASSWORD
 # 可选：LINX_API_KEY、LINX_API_BASE
+# 可选函数 Secret DATABASE_URL：Dashboard → Connect → Transaction pooler（6543）。
+# 不设则 Edge 走 PostgREST。不要用平台注入的 SUPABASE_DB_URL（直连，Edge 上很慢）。
 name: deploy
 
 on:

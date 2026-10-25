@@ -30,16 +30,21 @@ function createHub(
 ): Hub {
   const supabaseUrl = options.supabaseUrl?.replace(/\/$/, "");
   const serviceRoleKey = options.serviceRoleKey;
+  // DATABASE_URL 必须是事务池（6543）。平台注入的 SUPABASE_DB_URL 是直连，
+  // Edge 每次冷连接往往十几秒，不能当默认。
   if (options.databaseUrl) {
+    console.log("mcp hub sql");
     return new SqlHub(options.databaseUrl, owns, send);
   }
   if (supabaseUrl && serviceRoleKey) {
+    console.log("mcp hub rest");
     return new RestHub(
       { url: supabaseUrl, key: serviceRoleKey, request: fetch },
       owns,
       send,
     );
   }
+  console.log("mcp hub memory");
   return new MemoryHub(options.engine ?? new GameEngine(), send);
 }
 
@@ -530,9 +535,8 @@ function flush(hub: Hub, sessionId: string): Promise<void> {
   return Promise.resolve();
 }
 
-const databaseUrl = Deno.env.get("DATABASE_URL") ||
-  Deno.env.get("SUPABASE_DB_URL") ||
-  "";
+// 仅显式 DATABASE_URL（事务池）。忽略 SUPABASE_DB_URL 直连。
+const databaseUrl = Deno.env.get("DATABASE_URL") || "";
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const shared = Boolean(supabaseUrl && serviceRoleKey) || Boolean(databaseUrl);

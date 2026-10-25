@@ -104,12 +104,7 @@ export class RestHub {
     input: HubCall,
     key: string,
   ): Promise<unknown | null> {
-    const snapshot = input.command.tool === "submit_lobby_text"
-      ? (await Promise.all([
-        this.clearPending(key),
-        this.loadEngine(key),
-      ]))[1]
-      : await this.loadEngine(key);
+    const snapshot = await this.loadEngine(key);
     const engine = new GameEngine();
     engine.loadState(snapshot);
     const result = await engine.handle(input.command);
@@ -130,8 +125,10 @@ export class RestHub {
     const body = result.caller
       ? rpcResult(input.rpcId, result.caller)
       : rpcResult(input.rpcId, EMPTY);
-    // 状态已写完再投递；本机 SSE 立刻送到，跨 isolate 再落库。
-    await this.publish(input.sessionId, body);
+    // 本机 SSE / streamable 立刻送到；跨 isolate 再落库。不挡 HTTP 回包。
+    if (!this.send(input.sessionId, body)) {
+      await this.publish(input.sessionId, body);
+    }
     return body;
   }
 
@@ -160,12 +157,6 @@ export class RestHub {
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
-  }
-
-  private async clearPending(key: string): Promise<void> {
-    await this.rpc("DELETE", "ly_mcp_pending", {
-      query: `device_key=eq.${encodeURIComponent(key)}`,
-    });
   }
 
   private async route(key: string, delivery: SayDelivery): Promise<void> {

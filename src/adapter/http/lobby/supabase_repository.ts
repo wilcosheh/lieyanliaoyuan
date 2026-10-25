@@ -88,7 +88,10 @@ export class SupabaseWebLobbyRepository implements WebLobbyRepository {
       {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
-        body: JSON.stringify({ status: "CANCELLED", updated_at: new Date().toISOString() }),
+        body: JSON.stringify({
+          status: "CANCELLED",
+          updated_at: new Date().toISOString(),
+        }),
       },
     );
     return rows.length === 1;
