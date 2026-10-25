@@ -148,3 +148,44 @@ Deno.test("a cancelled wait is rebound to the next wait_event", async () => {
   assertEquals(rebound.includes('"id":4'), true);
   await reader.cancel();
 });
+
+Deno.test("product name is rejected as device_id", async () => {
+  const handle = createMcpServer({
+    engine: new GameEngine(),
+    connectionKey: "secret",
+  });
+  const sse = await handle(
+    new Request("http://localhost/mcp", {
+      headers: { authorization: "Bearer secret", accept: "text/event-stream" },
+    }),
+  );
+  const reader = sse.body!.getReader();
+  const opened = await readUntil(reader, "sessionId=");
+  const sessionId = opened.match(/sessionId=([0-9a-f-]+)/)?.[1] ?? "";
+  const posted = handle(
+    new Request(`http://localhost/mcp/message?sessionId=${sessionId}`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: {
+          name: "submit_lobby_text",
+          arguments: { device_id: "烈焰燎原", text: "人机对战" },
+        },
+      }),
+    }),
+  );
+  const [accepted, message] = await Promise.all([
+    posted,
+    readUntil(reader, "设备号无效"),
+  ]);
+  assertEquals(accepted.status, 202);
+  assertEquals(message.includes("设备号无效。请改用提示词里的设备号。"), true);
+  assertEquals(message.includes("对手是"), false);
+  await reader.cancel();
+});

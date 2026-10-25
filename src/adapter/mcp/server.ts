@@ -1,3 +1,4 @@
+import { CHARACTERS } from "../../engine/characters/skills.ts";
 import { GameEngine, type ToolName } from "../../engine/service/game.ts";
 import { MemoryHub } from "./hub.ts";
 import { PostgresHub } from "./postgres.ts";
@@ -6,6 +7,7 @@ import {
   INSTRUCTIONS,
   messageEndpoint,
   type RpcId,
+  rpcResult,
   toolArguments,
 } from "./protocol.ts";
 
@@ -45,7 +47,7 @@ const TOOLS: Array<{ name: ToolName; description: string }> = [
   {
     name: "submit_lobby_text",
     description:
-      "大厅或复盘里的原话。选角、练习、对电脑、人机对战、开房间、创建房间、房间号、准备、再来一局、复盘。device_id 用提示词里的设备号。text 填玩家原话。",
+      "大厅或复盘里的原话。选角、练习、对电脑、人机对战、开房间、创建房间、房间号、准备、再来一局、复盘。device_id 用提示词里的设备号，不要填烈焰燎原或角色名。text 填玩家原话。",
   },
   {
     name: "submit_utterance",
@@ -444,6 +446,22 @@ async function acceptMessage(
   }
   const seat = args.seat === "A" || args.seat === "B" ? args.seat : undefined;
   const deviceId = String(args.device_id);
+  if (
+    deviceId === "烈焰燎原" || CHARACTERS.some((item) => item.name === deviceId)
+  ) {
+    const body = rpcResult(id, {
+      code: "INVALID_DEVICE",
+      event_id: "",
+      say: "设备号无效。请改用提示词里的设备号。",
+      clips: [],
+      stop_clips: false,
+      ack_required: false,
+      phase: "LOBBY",
+      wait: false,
+    });
+    await ctx.hub.publish(sessionId, body);
+    return done(body);
+  }
   const perfection = typeof args.perfection === "number"
     ? args.perfection
     : undefined;
