@@ -13,7 +13,7 @@
 
 ## 代码
 
-`README.md`、`src/game`、`src/battle`
+`src/game`、`src/battle`、`src/mcp`
 仍是旧对局。不要按当前产品文档去改这套实现，也不要把旧实现写回三份设计文档。
 
 改完 Markdown 或 TypeScript 后跑 `deno fmt`。声称检查通过之前跑
