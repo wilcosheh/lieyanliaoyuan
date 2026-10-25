@@ -21,6 +21,7 @@ Deno.test("absorbPeer keeps the host room visible to a guest snapshot", () => {
       mode: "ONLINE",
       cpuCharacterId: null,
       pendingPractice: false,
+      echoedOpensAt: null,
       casting: false,
       wasInterrupted: false,
       rematch: false,
