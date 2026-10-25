@@ -57,7 +57,7 @@ const TOOLS: Array<{ name: ToolName; description: string }> = [
   {
     name: "begin_cast",
     description:
-      "开口时调用。窗口没开则被拒绝。同机要把声纹分出的 seat 一并传入。",
+      "玩家开始念技能名时调用。返回「三。二。一。」就原样念完并 wait_event，禁止再调本工具。同机要把声纹分出的 seat 一并传入。",
   },
   { name: "cancel_cast", description: "取消自己还没念完的施法。" },
   {

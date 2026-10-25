@@ -206,11 +206,45 @@ Deno.test("cpu cast interrupts a player who already began", async () => {
   now.value = COUNTDOWN_MS + 3 * 400 + 2000;
   const late = await call(game, "d1", "c6", "submit_utterance", "锐刃突刺");
   assertEquals(late.caller?.code, "CAST_INTERRUPTED");
-  assertEquals(late.caller?.say, "吟唱被打断。");
+  assertEquals(late.caller?.say.includes("吟唱被打断。"), true);
+  assertEquals(late.caller?.say.includes("中了"), true);
+  assertEquals(late.caller?.say.includes("三。二。一。"), true);
   assertEquals(
     late.pushes.some((push) => push.delivery.say.includes("中了")),
-    true,
+    false,
   );
+});
+
+Deno.test("a late skill hears the cpu hit and further casts do not spin", async () => {
+  const now = { value: 0 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  now.value = COUNTDOWN_MS + 3 * 400 + 2000;
+  const late = await call(game, "d1", "c4", "submit_utterance", "沪震重机");
+  assertEquals(late.caller?.say.includes("中了破风斩。"), true);
+  assertEquals(late.caller?.say.endsWith("三。二。一。"), true);
+
+  const again = await call(game, "d1", "c5", "begin_cast");
+  assertEquals(again.caller?.say, "三。二。一。");
+  const spun = await call(game, "d1", "c6", "begin_cast");
+  assertEquals(spun.caller?.say, "");
+  assertEquals(spun.caller?.wait, true);
+  assertEquals(spun.caller?.say.includes("中了"), false);
+});
+
+Deno.test("repeating a cast before the window opens stays silent", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  const early = await call(game, "d1", "c4", "submit_utterance", "破风斩");
+  assertEquals(early.caller?.say, "三。二。一。");
+  const loop = await call(game, "d1", "c5", "begin_cast");
+  assertEquals(loop.caller?.say, "");
+  assertEquals(loop.caller?.wait, true);
 });
 
 Deno.test("local duo requires a seat and enrolls both speakers", async () => {

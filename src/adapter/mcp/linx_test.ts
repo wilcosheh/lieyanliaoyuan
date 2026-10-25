@@ -31,3 +31,15 @@ Deno.test("linx encodes only clips that already have a url", () => {
     [],
   );
 });
+
+Deno.test("countdown is its own content block after the battle line", () => {
+  const encoded = encodeLinx({
+    ...delivery,
+    say: "双方各1000血。血量先到0的一方落败。三。二。一。",
+    clips: [],
+  });
+  assertEquals(encoded.content, [
+    { type: "text", text: "双方各1000血。血量先到0的一方落败。" },
+    { type: "text", text: "三。二。一。" },
+  ]);
+});
