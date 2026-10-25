@@ -880,21 +880,8 @@ export class GameEngine {
       item.hostKey === actor.key || item.guestKey === actor.key
     );
     if (room) room.status = "STARTED";
-    const now = this.now();
-    const opensAt = now + COUNTDOWN_MS;
     const meta = this.metas.get(battleId);
-    if (meta) {
-      meta.ackDeadline = null;
-      meta.countdownSent = true;
-      meta.opensAt = opensAt;
-      meta.cpuCompleteAt = null;
-      const cpu = this.chooseCpuSkill(started.state);
-      if (cpu && meta.cpuPlayerId) {
-        meta.cpuCompleteAt = opensAt +
-          Array.from(cpu.name).length * CPU_MS_PER_GRAPHEME +
-          meta.cpuExtraMs;
-      }
-    }
+    if (meta) this.armAck(battleId);
     for (const member of this.actorsIn(battleId)) member.phase = "BATTLE";
     const you = started.state.players.find((player) =>
       player.playerId === actor.playerId
@@ -902,18 +889,12 @@ export class GameEngine {
     const opp = started.state.players.find((player) =>
       player.playerId !== actor.playerId
     );
-    const say = `${
-      openingSay(you?.hp ?? 1000, opp?.hp ?? 1000)
-    }${COUNTDOWN_SAY}`;
-    const options = { opensAt, opensInMs: COUNTDOWN_MS };
+    const say = openingSay(you?.hp ?? 1000, opp?.hp ?? 1000);
     for (const member of this.actorsIn(battleId)) {
       if (member.key === actor.key) continue;
-      this.side(
-        member,
-        this.delivery(member, "ACCEPTED", say, options),
-      );
+      this.side(member, this.battleLine(member, say));
     }
-    return this.delivery(actor, "ACCEPTED", say, options);
+    return this.battleLine(actor, say);
   }
 
   private async rematch(actor: Actor): Promise<SayDelivery> {
@@ -1015,7 +996,14 @@ export class GameEngine {
     if (text === "投降") return await this.surrender(actor);
     const cpu = await this.takeDueCpu(actor);
     if (cpu) return cpu;
-    if (!this.windowOpen(actor)) return await this.closedOrEarly(actor);
+    if (!this.windowOpen(actor)) {
+      if (actor.wasInterrupted || actor.casting) {
+        return await this.closedOrEarly(actor);
+      }
+      const countdown = await this.claimCountdown(actor);
+      if (countdown) return countdown;
+      return await this.closedOrEarly(actor);
+    }
     return await this.cast(actor, text, commandId, perfection);
   }
 
@@ -1166,6 +1154,11 @@ export class GameEngine {
     const cpu = await this.takeDueCpu(actor);
     if (cpu) return cpu;
     if (!this.windowOpen(actor)) {
+      if (actor.wasInterrupted || actor.casting) {
+        return await this.closedOrEarly(actor);
+      }
+      const countdown = await this.claimCountdown(actor);
+      if (countdown) return countdown;
       return this.notOpenYet(actor);
     }
     actor.casting = true;
@@ -1173,10 +1166,8 @@ export class GameEngine {
   }
 
   private async ack(actor: Actor): Promise<SayDelivery> {
-    const meta = actor.battleId ? this.metas.get(actor.battleId) : undefined;
-    if (meta && !meta.countdownSent && actor.phase === "BATTLE") {
-      await this.openWindow(actor.battleId!, this.now());
-    }
+    const countdown = await this.claimCountdown(actor);
+    if (countdown) return countdown;
     const current = actor.battleId ? this.metas.get(actor.battleId) : undefined;
     if (
       current?.countdownSent && current.opensAt !== null &&
@@ -1363,6 +1354,25 @@ export class GameEngine {
     }
   }
 
+  /** 还没发过倒数时，发给当前调用者并开始计时。这一句已经算播报过。 */
+  private async claimCountdown(actor: Actor): Promise<SayDelivery | null> {
+    const battleId = actor.battleId;
+    const meta = battleId ? this.metas.get(battleId) : undefined;
+    if (!battleId || !meta || meta.countdownSent || actor.phase !== "BATTLE") {
+      return null;
+    }
+    await this.openWindow(battleId, this.now());
+    const index = this.pushes.findIndex((push) => this.forCaller(actor, push));
+    if (index < 0) return null;
+    const [mine] = this.pushes.splice(index, 1);
+    actor.echoedOpensAt = meta.opensAt;
+    return mine?.delivery ?? null;
+  }
+
+  private battleLine(actor: Actor, say: string): SayDelivery {
+    return this.delivery(actor, "ACCEPTED", say, { ack: true, wait: false });
+  }
+
   private async openWindow(battleId: string, now: number): Promise<void> {
     const meta = this.metas.get(battleId);
     if (!meta || meta.countdownSent) return;
@@ -1463,43 +1473,20 @@ export class GameEngine {
     });
   }
 
-  /**
-   * 人机：战况后立刻接倒数，避免空等回执时玩家抢念、听不到三二一。
-   * 联机：仍先回执再开倒数。
-   */
-  private async armNextRound(
+  /** 战况先回执，回执到了才发「三。二。一。」并开窗。电脑出招从这一刻才开始计。 */
+  private armNextRound(
     battleId: string,
     deliveries: SayDelivery[],
     finished: boolean,
-  ): Promise<void> {
+  ): void {
     if (finished) return;
-    const meta = this.metas.get(battleId);
-    if (!meta) return;
-    if (!meta.cpuPlayerId) {
-      this.armAck(battleId);
-      return;
-    }
-    const now = this.now();
-    const opensAt = now + COUNTDOWN_MS;
-    meta.opensAt = opensAt;
-    meta.countdownSent = true;
-    meta.ackDeadline = null;
-    const state = await this.load(battleId);
-    const cpu = state ? this.chooseCpuSkill(state) : undefined;
-    if (cpu) {
-      meta.cpuCompleteAt = opensAt +
-        Array.from(cpu.name).length * CPU_MS_PER_GRAPHEME +
-        meta.cpuExtraMs;
-    } else {
-      meta.cpuCompleteAt = null;
-    }
+    this.armAck(battleId);
     for (const delivery of deliveries) {
       if (delivery.phase === "REVIEW") continue;
-      delivery.say = `${delivery.say}${COUNTDOWN_SAY}`;
-      delivery.opens_at = new Date(opensAt).toISOString();
-      delivery.opens_in_ms = COUNTDOWN_MS;
-      delivery.ack_required = false;
-      delivery.wait = true;
+      delivery.ack_required = true;
+      delivery.wait = false;
+      delivery.opens_at = undefined;
+      delivery.opens_in_ms = undefined;
     }
   }
 
