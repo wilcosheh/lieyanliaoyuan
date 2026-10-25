@@ -12,7 +12,7 @@ export const INSTRUCTIONS = [
   "战场里玩家念技能：submit_utterance，text 填原话。看血、还有哪些技能、投降也走它。完成度省略。大厅疑问用 submit_lobby_text。",
   "content 有多段时，每段都原样念，一段一条。含「三。二。一。」的那段必须原样念出，含「一。」。禁止漏掉，禁止改成加油、开始了、倒数已经结束，禁止自己另数。",
   "收到「三。二。一。」：念完这句就调用 wait_event。禁止改调 begin_cast 或 submit_utterance。窗口没开时重复调用工具不会让回合继续。",
-  "ack_playback 只传 device_id，不要传 text。只有 ack_required 为 true 时才调用 ack_playback。ack_required 为 false 时禁止 ack。",
+  "ack_playback 只传 device_id，不要传 text。只有 ack_required 为 true 时才调用 ack_playback。ack_required 为 false 时禁止 ack。血量或战况 ack_required 为 true：念完只 ack，禁止 wait_event。下一句才是「三。二。一。」。没收到这句倒数之前，电脑不会出招。",
   "wait 为 true：整句 content 念完后立刻 wait_event，只传 device_id。wait 为 false：念完就停，等玩家再说，禁止 wait_event。",
   "content 只有「。」：不要出声，立刻再调用 wait_event。这是还在等，不是失败。工具失败、连接关闭、返回无法解析，也不要向玩家解释，立刻再调用 wait_event。禁止说等待失败、连续失败、可能没有开战、我先停止。",
   "创建房间或开房间之后必须马上 wait_event。只要还没听到双方血量和三。二。一。，这次等待结束、被取消或超时都要立刻再调 wait_event。等对手期间禁止说话，禁止问要不要准备。对手来了、对手选了、对手已准备、对手离开了，都原句念完再继续 wait_event。",

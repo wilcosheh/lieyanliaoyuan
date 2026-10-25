@@ -308,7 +308,10 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
     device_id: "cpu",
     text: "准备",
   });
-  assertEquals(ready.text.includes("三。二。一。"), true);
+  assertEquals(ready.text.includes("双方各"), true);
+  assertEquals(ready.text.includes("三。二。一。"), false);
+  const countdown = await say(31, "cpu", "ack_playback", { device_id: "cpu" });
+  assertEquals(countdown.text, "三。二。一。");
   now.value = 1_000 + 3_000 + 3 * 400 + 2_000;
   const blood = await say(4, "cpu", "submit_utterance", {
     device_id: "cpu",
@@ -386,7 +389,12 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
     device_id: "guest",
     text: "准备",
   });
-  assertEquals(started.includes("三。二。一。"), true);
+  assertEquals(started.includes("双方各"), true);
+  assertEquals(started.includes("三。二。一。"), false);
+  const openedCountdown = await roomSay(61, "guest", "ack_playback", {
+    device_id: "guest",
+  });
+  assertEquals(openedCountdown.includes("三。二。一。"), true);
   online.value += 3_000;
   await roomSay(7, "guest", "begin_cast", { device_id: "guest" });
   const slash = await roomSay(8, "host", "submit_utterance", {

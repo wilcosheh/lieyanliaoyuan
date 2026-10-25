@@ -62,23 +62,23 @@ Deno.test("versus cpu opens on one countdown sentence and resolves the first cas
   const ready = await call(game, "d1", "c3", "submit_lobby_text", "准备");
   assertEquals(
     ready.caller?.say,
-    "双方各1000血。血量先到0的一方落败。三。二。一。",
+    "双方各1000血。血量先到0的一方落败。",
   );
-  assertEquals(ready.caller?.ack_required, false);
-  assertEquals(ready.caller?.opens_in_ms, COUNTDOWN_MS);
+  assertEquals(ready.caller?.ack_required, true);
+  assertEquals(ready.caller?.wait, false);
+  assertEquals(ready.caller?.say.includes("三。二。一。"), false);
 
   const early = await call(game, "d1", "c4", "submit_utterance", "疾风剑");
-  assertEquals(early.caller?.code, "ROUND_NOT_OPEN");
+  assertEquals(early.caller?.code, "ACCEPTED");
   assertEquals(early.caller?.say, "三。二。一。");
+  assertEquals(early.caller?.say.includes("中了"), false);
 
   now.value += COUNTDOWN_MS;
   const cast = await call(game, "d1", "c5", "submit_utterance", "疾风剑");
   assertEquals(cast.caller?.code, "ACCEPTED");
-  assertEquals(
-    cast.caller?.say,
-    "疾风剑命中。你1000血。对手935血。三。二。一。",
-  );
-  assertEquals(cast.caller?.wait, true);
+  assertEquals(cast.caller?.say, "疾风剑命中。你1000血。对手935血。");
+  assertEquals(cast.caller?.ack_required, true);
+  assertEquals(cast.caller?.wait, false);
   assertEquals(cast.caller?.phase, "BATTLE");
 });
 
@@ -112,6 +112,19 @@ Deno.test("lobby 选角 lists characters and practice without one asks for a nam
   assertEquals(practice.caller?.say.includes("风行弓手"), true);
 });
 
+Deno.test("cpu stays quiet until the countdown line is issued", async () => {
+  const now = { value: 0 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  const ready = await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  assertEquals(ready.caller?.ack_required, true);
+  now.value = 60_000;
+  const early = await call(game, "d1", "c4", "submit_utterance", "疾风剑");
+  assertEquals(early.caller?.say, "三。二。一。");
+  assertEquals(early.caller?.say.includes("中了"), false);
+});
+
 Deno.test("early ack repeats the countdown instead of an empty line", async () => {
   const now = { value: 1_000 };
   const game = engine(now);
@@ -120,7 +133,8 @@ Deno.test("early ack repeats the countdown instead of an empty line", async () =
   await call(game, "d1", "c3", "submit_lobby_text", "准备");
   const acked = await call(game, "d1", "c4", "ack_playback");
   assertEquals(acked.caller?.say, "三。二。一。");
-  assertEquals(acked.caller?.wait, false);
+  assertEquals(acked.caller?.wait, true);
+  assertEquals(acked.caller?.ack_required, false);
   assertEquals(acked.caller?.opens_in_ms, COUNTDOWN_MS);
 });
 
@@ -201,6 +215,7 @@ Deno.test("cpu cast interrupts a player who already began", async () => {
   await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
   await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
   await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  await call(game, "d1", "c4", "ack_playback");
   now.value = COUNTDOWN_MS;
   const began = await call(game, "d1", "c5", "begin_cast");
   assertEquals(began.caller?.code, "ACCEPTED");
@@ -212,7 +227,7 @@ Deno.test("cpu cast interrupts a player who already began", async () => {
   assertEquals(late.caller?.say.includes("中了疾风剑。"), true);
   assertEquals(late.caller?.say.includes("你935血。"), true);
   assertEquals(late.caller?.say.includes("对手1000血。"), true);
-  assertEquals(late.caller?.say.includes("三。二。一。"), true);
+  assertEquals(late.caller?.say.includes("三。二。一。"), false);
   assertEquals(
     late.pushes.some((push) => push.deviceId === "d1"),
     false,
@@ -225,10 +240,11 @@ Deno.test("a late skill hears the cpu hit and further casts do not spin", async 
   await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
   await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
   await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  await call(game, "d1", "c3b", "ack_playback");
   now.value = COUNTDOWN_MS + 3 * 400 + 2000;
   const late = await call(game, "d1", "c4", "submit_utterance", "沪震重机");
   assertEquals(late.caller?.say.includes("中了疾风剑。"), true);
-  assertEquals(late.caller?.say.endsWith("三。二。一。"), true);
+  assertEquals(late.caller?.say.includes("三。二。一。"), false);
 
   const again = await call(game, "d1", "c5", "begin_cast");
   assertEquals(again.caller?.say, "三。二。一。");
@@ -511,8 +527,10 @@ Deno.test("versus cpu and online join still open without practice interference",
   await call(cpu, "d1", "c1", "submit_lobby_text", "对电脑");
   await call(cpu, "d1", "c2", "submit_lobby_text", "风行弓手");
   const ready = await call(cpu, "d1", "c3", "submit_lobby_text", "准备");
-  assertEquals(ready.caller?.say.includes("三。二。一。"), true);
-  assertEquals(ready.caller?.wait, true);
+  assertEquals(ready.caller?.say.includes("双方各"), true);
+  assertEquals(ready.caller?.say.includes("三。二。一。"), false);
+  assertEquals(ready.caller?.ack_required, true);
+  assertEquals(ready.caller?.wait, false);
 
   const online = engine({ value: 0 });
   const opened = await call(
@@ -552,11 +570,16 @@ Deno.test("versus cpu and online join still open without practice interference",
     "submit_lobby_text",
     "准备",
   );
-  assertEquals(guestReady.caller?.say.includes("三。二。一。"), true);
+  assertEquals(guestReady.caller?.say.includes("双方各"), true);
+  assertEquals(guestReady.caller?.say.includes("三。二。一。"), false);
+  assertEquals(guestReady.caller?.ack_required, true);
   assertEquals(
     guestReady.pushes[0]?.delivery.say.includes("三。二。一。"),
-    true,
+    false,
   );
+  const counted = await call(online, "guest", "c7", "ack_playback");
+  assertEquals(counted.caller?.say, "三。二。一。");
+  assertEquals(counted.pushes[0]?.delivery.say, "三。二。一。");
 });
 
 Deno.test("engine snapshot restores the selected character and the room", async () => {
@@ -590,6 +613,7 @@ Deno.test("slow cpu resolution does not replace 看血 or a late skill sentence"
   await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
   await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
   await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  await call(game, "d1", "c3b", "ack_playback");
   now.value = COUNTDOWN_MS + 3 * 400 + 2000;
   const blood = await call(game, "d1", "c4", "submit_utterance", "看血");
   assertEquals(blood.caller?.say.includes("中了"), false);
@@ -606,6 +630,7 @@ Deno.test("slow cpu resolution does not replace 看血 or a late skill sentence"
   await call(again, "d1", "c1", "submit_lobby_text", "对电脑");
   await call(again, "d1", "c2", "submit_lobby_text", "烈焰剑士");
   await call(again, "d1", "c3", "submit_lobby_text", "准备");
+  await call(again, "d1", "c3b", "ack_playback");
   later.value = COUNTDOWN_MS;
   await call(again, "d1", "c4", "begin_cast");
   later.value = COUNTDOWN_MS + 3 * 400 + 2000;
@@ -711,11 +736,11 @@ Deno.test("online cast, interrupt and surrender are spoken to both sides", async
     "submit_lobby_text",
     "准备",
   );
-  assertEquals(guestReady.caller?.say.includes("三。二。一。"), true);
-  assertEquals(
-    guestReady.pushes[0]?.delivery.say.includes("三。二。一。"),
-    true,
-  );
+  assertEquals(guestReady.caller?.say.includes("双方各"), true);
+  assertEquals(guestReady.caller?.say.includes("三。二。一。"), false);
+  const counted = await call(game, "guest", "c6b", "ack_playback");
+  assertEquals(counted.caller?.say, "三。二。一。");
+  assertEquals(counted.pushes[0]?.delivery.say, "三。二。一。");
 
   now.value += COUNTDOWN_MS;
   await call(game, "guest", "c7", "begin_cast");
