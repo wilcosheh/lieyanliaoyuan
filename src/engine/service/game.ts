@@ -91,6 +91,8 @@ type Actor = {
   battleId: string | null;
   mode: Mode | null;
   cpuCharacterId: string | null;
+  /** 说过练习但还没选角：选完角色直接进练习。 */
+  pendingPractice: boolean;
   casting: boolean;
   wasInterrupted: boolean;
   rematch: boolean;
@@ -168,8 +170,13 @@ function wantsVersusCpu(text: string): boolean {
 
 function wantsPractice(text: string): boolean {
   return text === "开始练习" || text === "练技能" || text === "练习" ||
-    text === "练一练" || text.includes("开始练习") ||
+    text === "练一练" || text === "开练" || text.includes("开始练习") ||
     text.includes("练技能") || text.includes("练习技能");
+}
+
+/** 大厅里「开始吧」：没进对战模式就练技能，已在对战模式就当准备。 */
+function wantsLooseStart(text: string): boolean {
+  return text === "开始吧" || text === "开始" || text === "开练吧";
 }
 
 function wantsEndPractice(text: string): boolean {
@@ -302,7 +309,10 @@ export class GameEngine {
       this.devices.set(device.deviceId, device);
     }
     this.actors.clear();
-    for (const actor of next.actors) this.actors.set(actor.key, actor);
+    for (const actor of next.actors) {
+      if (actor.pendingPractice === undefined) actor.pendingPractice = false;
+      this.actors.set(actor.key, actor);
+    }
     this.rooms.clear();
     for (const room of next.rooms) this.rooms.set(room.code, room);
     this.metas.clear();
@@ -406,12 +416,16 @@ export class GameEngine {
       return await this.enroll(actor, device);
     }
     if (this.inOpenRoom(actor, device)) {
-      return await this.roomLobby(
-        actor,
-        device,
-        text,
-        command.terminal ?? "voice",
-      );
+      if (wantsPractice(text) || wantsVersusCpu(text)) {
+        this.leaveRoomQuiet(actor, device);
+      } else {
+        return await this.roomLobby(
+          actor,
+          device,
+          text,
+          command.terminal ?? "voice",
+        );
+      }
     }
     if (text === "两个人" || text.includes("两个人")) {
       if (!device.voiceprint) return this.speak(actor, ENTRANCE);
@@ -424,6 +438,15 @@ export class GameEngine {
       return this.speak(actor, "练习结束。说对电脑打一局，或开房间。");
     }
     if (wantsPractice(text)) {
+      return this.startPractice(actor);
+    }
+    if (wantsLooseStart(text)) {
+      if (
+        actor.mode === "VS_CPU" || actor.mode === "ONLINE" ||
+        actor.mode === "LOCAL_DUO"
+      ) {
+        return await this.ready(actor);
+      }
       return this.startPractice(actor);
     }
     if (wantsOpenRoom(text)) {
@@ -453,6 +476,12 @@ export class GameEngine {
     }
     if (wantsCharacterList(text)) {
       actor.phase = "LOBBY";
+      if (actor.pendingPractice) {
+        return this.speak(
+          actor,
+          `先说角色名。可选${CHARACTER_LIST}。`,
+        );
+      }
       return this.speak(actor, ENTRANCE);
     }
     const selectedName = extractCharacterName(text);
@@ -472,12 +501,14 @@ export class GameEngine {
 
   private startPractice(actor: Actor): SayDelivery {
     if (!actor.characterId) {
+      actor.pendingPractice = true;
       return this.speak(
         actor,
         `先说角色名。可选${CHARACTER_LIST}。`,
         "CHARACTER_REQUIRED",
       );
     }
+    actor.pendingPractice = false;
     const character = getCharacter(actor.characterId);
     actor.phase = "PRACTICE";
     const names = character?.skills.map((skill) => skill.name) ?? [];
@@ -600,7 +631,9 @@ export class GameEngine {
       actor.battleId = null;
       return this.openRoom(actor, device, terminal);
     }
-    if (wantsReady(text)) return await this.ready(actor);
+    if (wantsReady(text) || wantsLooseStart(text)) {
+      return await this.ready(actor);
+    }
     if (text === "还有哪些技能" || text === "有哪些技能") {
       return await this.listSkills(actor);
     }
@@ -615,6 +648,12 @@ export class GameEngine {
   }
 
   private leaveRoom(actor: Actor, device: Device): SayDelivery {
+    this.leaveRoomQuiet(actor, device);
+    return this.speak(actor, "已离开房间。可以说练习，对电脑，或开房间。");
+  }
+
+  /** 退出空房间或改去练习/对电脑时，不念离开词。有对手则通知对方。 */
+  private leaveRoomQuiet(actor: Actor, device: Device): void {
     const room = device.roomCode ? this.rooms.get(device.roomCode) : undefined;
     const otherKey = room
       ? (room.hostKey === actor.key ? room.guestKey : room.hostKey)
@@ -634,7 +673,6 @@ export class GameEngine {
       other.battleId = null;
       this.side(other, this.speak(other, "对手离开了。"));
     }
-    return this.speak(actor, "已离开房间。可以说练习，对电脑，或开房间。");
   }
 
   private async versusCpu(actor: Actor, text: string): Promise<SayDelivery> {
@@ -686,15 +724,16 @@ export class GameEngine {
       }
       return this.speak(actor, `${label}已选${name}。`);
     }
+    if (actor.pendingPractice) return this.startPractice(actor);
     return this.speak(actor, `已选${name}。`);
   }
 
   private async ready(actor: Actor): Promise<SayDelivery> {
     if (!actor.characterId) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     if (!actor.battleId || !(await this.isPreparing(actor.battleId))) {
@@ -707,15 +746,26 @@ export class GameEngine {
       } else if (actor.mode === "LOCAL_DUO" || actor.mode === "ONLINE") {
         const other = this.opponent(actor);
         if (!other) {
-          return this.delivery(actor, "ACCEPTED", "你已准备。等对手准备。");
+          if (actor.mode === "ONLINE") {
+            return this.speak(
+              actor,
+              "对手还没来。等对手加入，或说退出后练习。",
+            );
+          }
+          return this.speak(actor, "你已准备。等对手准备。");
         }
         await this.createPairBattle(
           actor.seat === "B" ? other : actor,
           actor.seat === "B" ? actor : other,
           null,
         );
+      } else if (actor.pendingPractice) {
+        return this.startPractice(actor);
       } else {
-        return this.delivery(actor, "ACCEPTED", ENTRANCE);
+        return this.speak(
+          actor,
+          "可以说练习，对电脑，或开房间。选角色后说准备开战。",
+        );
       }
     }
     const battleId = actor.battleId;
@@ -806,12 +856,12 @@ export class GameEngine {
     const other = this.opponent(actor);
     if (!other?.rematch) {
       if (other) {
-        this.side(other, this.delivery(other, "ACCEPTED", "对手想再来一局。"));
+        this.side(other, this.speak(other, "对手想再来一局。"));
       }
-      return this.delivery(actor, "ACCEPTED", "");
+      return this.speak(actor, "已记下。等对手也说再来一局。");
     }
     if (!actor.characterId || !other.characterId || !actor.battleId) {
-      return this.delivery(actor, "ACCEPTED", "");
+      return this.speak(actor, "先说角色名，再说再来一局。");
     }
     const left = actor.seat === "B" ? other : actor;
     const right = actor.seat === "B" ? actor : other;
@@ -894,46 +944,34 @@ export class GameEngine {
   ): SayDelivery {
     if (wantsEndPractice(text)) {
       actor.phase = "LOBBY";
-      return this.delivery(
-        actor,
-        "ACCEPTED",
-        "练习结束。说对电脑打一局，或开房间。",
-      );
+      return this.speak(actor, "练习结束。说对电脑打一局，或开房间。");
     }
     if (!actor.characterId) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     const character = getCharacter(actor.characterId);
     if (!character) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     const matched = matchSkill(character, text);
     if (!matched.ok) {
-      return this.delivery(
-        actor,
-        matched.code,
-        rejectionSay(matched.code),
-      );
+      return this.speak(actor, rejectionSay(matched.code), matched.code);
     }
     const score = perfection === undefined
       ? matched.match.perfection
       : perfection;
     if (!Number.isFinite(score) || score < 0 || score > 100) {
-      return this.delivery(actor, "INVALID_PERFECTION", "");
+      return this.speak(actor, "", "INVALID_PERFECTION");
     }
-    return this.delivery(
-      actor,
-      "ACCEPTED",
-      practiceSay(matched.match.skill, score),
-    );
+    return this.speak(actor, practiceSay(matched.match.skill, score));
   }
 
   private async blood(actor: Actor): Promise<SayDelivery> {
@@ -965,26 +1003,25 @@ export class GameEngine {
 
   private async listSkills(actor: Actor): Promise<SayDelivery> {
     if (!actor.characterId) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     const character = getCharacter(actor.characterId);
     if (!character) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "CHARACTER_REQUIRED",
         rejectionSay("CHARACTER_REQUIRED"),
+        "CHARACTER_REQUIRED",
       );
     }
     if (
       !actor.battleId || actor.phase === "PRACTICE" || actor.phase === "LOBBY"
     ) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "ACCEPTED",
         skillListSay(character.skills.map((skill) => skill.name)),
       );
     }
@@ -1523,6 +1560,7 @@ export class GameEngine {
         battleId: null,
         mode: device.localDuo ? "LOCAL_DUO" : null,
         cpuCharacterId: null,
+        pendingPractice: false,
         casting: false,
         wasInterrupted: false,
         rematch: false,
@@ -1542,6 +1580,7 @@ export class GameEngine {
       battleId: null,
       mode: null,
       cpuCharacterId: null,
+      pendingPractice: false,
       casting: false,
       wasInterrupted: false,
       rematch: false,
