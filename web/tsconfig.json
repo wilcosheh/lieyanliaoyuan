@@ -32,6 +32,9 @@
       ],
       "@core/*": [
         "../src/*"
+      ],
+      "pinyin-pro": [
+        "./node_modules/pinyin-pro"
       ]
     }
   },
