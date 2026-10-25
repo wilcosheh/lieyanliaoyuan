@@ -57,14 +57,14 @@ jobs:
           LINX_API_BASE: ${{ secrets.LINX_API_BASE }}
         run: |
           supabase secrets set \
-            PUBLIC_BASE_URL="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/mcp"
+            PUBLIC_BASE_URL="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/game/mcp"
           if [ -n "${LINX_API_KEY:-}" ]; then
             supabase secrets set \
               LINX_API_KEY="$LINX_API_KEY" \
               LINX_API_BASE="${LINX_API_BASE:-https://xrobo.qiniu.com}"
           fi
 
-      - name: Deploy mcp function
+      - name: Deploy game function
         run: |
-          supabase functions deploy mcp --no-verify-jwt --project-ref "$SUPABASE_PROJECT_REF"
-          echo "MCP URL: https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/mcp"
+          supabase functions deploy game --no-verify-jwt --project-ref "$SUPABASE_PROJECT_REF"
+          echo "MCP URL: https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/game/mcp"
