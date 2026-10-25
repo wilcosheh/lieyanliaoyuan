@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "pinyin-pro": "npm:pinyin-pro@3.26.0",
+    "postgres": "npm:postgres@3.4.7",
+    "@std/assert": "jsr:@std/assert@1"
+  }
+}
