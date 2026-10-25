@@ -286,8 +286,11 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
       }),
     );
     const body = await response.json();
+    const content = body.result?.content ?? [];
     return {
-      text: String(body.result?.content?.[0]?.text ?? ""),
+      text: content.map((block: { text?: string }) => block.text ?? "").join(
+        "",
+      ),
       phase: String(body.result?.structuredContent?.phase ?? ""),
       code: String(body.result?.structuredContent?.code ?? ""),
     };
@@ -353,7 +356,8 @@ Deno.test("streamable mcp keeps 看血, speaks the interrupt, and forfeits after
       }),
     );
     const body = await response.json();
-    return String(body.result?.content?.[0]?.text ?? "");
+    const content = body.result?.content ?? [];
+    return content.map((block: { text?: string }) => block.text ?? "").join("");
   };
   const opened = await roomSay(1, "host", "submit_lobby_text", {
     device_id: "host",

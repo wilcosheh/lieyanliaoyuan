@@ -103,6 +103,8 @@ type Actor = {
   rematch: boolean;
   lastSeenAt: number;
   lastSessionId: string | null;
+  /** 这个 opensAt 已经回过一次「还不能开口」。重复调用不再回同一句。 */
+  echoedOpensAt: number | null;
 };
 
 type Device = {
@@ -323,6 +325,7 @@ export class GameEngine {
       if (actor.pendingHit === undefined) actor.pendingHit = null;
       if (actor.lastSeenAt === undefined) actor.lastSeenAt = 0;
       if (actor.lastSessionId === undefined) actor.lastSessionId = null;
+      if (actor.echoedOpensAt === undefined) actor.echoedOpensAt = null;
       this.actors.set(actor.key, actor);
     }
     this.rooms.clear();
@@ -427,7 +430,12 @@ export class GameEngine {
       }
     }
     const presence = this.notePresence(actor, command);
-    if (actor.phase === "BATTLE") await this.refresh(actor);
+    if (actor.phase === "BATTLE") {
+      // 断线任何命令都判。电脑结算不放在出招前，否则这句会被收成「三。二。一。」。
+      const settleCpu = command.tool === "wait_event" ||
+        command.tool === "ack_playback";
+      await this.refresh(actor, settleCpu);
+    }
     if (actor.phase === "REVIEW") {
       return this.remember(
         idempotencyKey,
@@ -457,7 +465,7 @@ export class GameEngine {
       case "ack_playback":
         return await this.ack(actor);
       case "begin_cast":
-        return this.begin(actor);
+        return await this.begin(actor);
       case "cancel_cast":
         actor.casting = false;
         return this.delivery(actor, "ACCEPTED", "");
@@ -995,11 +1003,18 @@ export class GameEngine {
     if (actor.phase === "PRACTICE") {
       return this.practiceUtterance(actor, text, perfection);
     }
-    if (text === "看血") return await this.blood(actor);
+    if (text === "看血") {
+      if (actor.battleId && this.cpuDue(actor)) {
+        await this.resolveCpu(actor.battleId);
+      }
+      return await this.blood(actor);
+    }
     if (text === "还有哪些技能" || text === "有哪些技能") {
       return await this.listSkills(actor);
     }
     if (text === "投降") return await this.surrender(actor);
+    const cpu = await this.takeDueCpu(actor);
+    if (cpu) return cpu;
     if (!this.windowOpen(actor)) return await this.closedOrEarly(actor);
     return await this.cast(actor, text, commandId, perfection);
   }
@@ -1147,12 +1162,14 @@ export class GameEngine {
     return mine?.delivery ?? this.delivery(actor, "ACCEPTED", "你输了。");
   }
 
-  private begin(actor: Actor): SayDelivery {
+  private async begin(actor: Actor): Promise<SayDelivery> {
+    const cpu = await this.takeDueCpu(actor);
+    if (cpu) return cpu;
     if (!this.windowOpen(actor)) {
       return this.notOpenYet(actor);
     }
     actor.casting = true;
-    return this.delivery(actor, "ACCEPTED", "");
+    return this.delivery(actor, "ACCEPTED", "", { wait: false });
   }
 
   private async ack(actor: Actor): Promise<SayDelivery> {
@@ -1310,7 +1327,7 @@ export class GameEngine {
     return restored ? "restored" : "ok";
   }
 
-  private async refresh(actor: Actor): Promise<void> {
+  private async refresh(actor: Actor, settleCpu: boolean): Promise<void> {
     const battleId = actor.battleId;
     if (!battleId) return;
     const meta = this.metas.get(battleId);
@@ -1327,7 +1344,7 @@ export class GameEngine {
       await this.openWindow(battleId, this.now());
     }
     if (actor.phase !== "BATTLE") return;
-    if (kinds.includes("cpu")) await this.resolveCpu(battleId);
+    if (settleCpu && kinds.includes("cpu")) await this.resolveCpu(battleId);
   }
 
   private async forfeitDisconnect(battleId: string): Promise<void> {
@@ -1699,6 +1716,7 @@ export class GameEngine {
         rematch: false,
         lastSeenAt: 0,
         lastSessionId: null,
+        echoedOpensAt: null,
       };
       this.actors.set(key, actor);
     }
@@ -1722,6 +1740,7 @@ export class GameEngine {
       rematch: false,
       lastSeenAt: 0,
       lastSessionId: null,
+      echoedOpensAt: null,
     };
   }
 
@@ -1748,19 +1767,48 @@ export class GameEngine {
     return this.notOpenYet(actor);
   }
 
+  /** 电脑时间已到时结算电脑，并把这一方的战况留给当前调用，避免再推一条没人念的旁路。 */
+  private async takeDueCpu(actor: Actor): Promise<SayDelivery | null> {
+    if (!actor.battleId || !this.cpuDue(actor)) return null;
+    await this.resolveCpu(actor.battleId);
+    const index = this.pushes.findIndex((push) => this.forCaller(actor, push));
+    if (index < 0) return null;
+    const [mine] = this.pushes.splice(index, 1);
+    if (!mine) return null;
+    if (actor.wasInterrupted) {
+      mine.delivery.code = "CAST_INTERRUPTED";
+      actor.wasInterrupted = false;
+      actor.casting = false;
+    }
+    return mine.delivery;
+  }
+
+  private cpuDue(actor: Actor): boolean {
+    const meta = actor.battleId ? this.metas.get(actor.battleId) : undefined;
+    return meta?.cpuCompleteAt !== null && meta?.cpuCompleteAt !== undefined &&
+      this.now() >= meta.cpuCompleteAt;
+  }
+
   private notOpenYet(actor: Actor): SayDelivery {
     const meta = actor.battleId ? this.metas.get(actor.battleId) : undefined;
+    const stamp = meta?.opensAt ?? 0;
+    if (actor.echoedOpensAt === stamp) {
+      return this.delivery(actor, "ROUND_NOT_OPEN", "", { wait: true });
+    }
+    actor.echoedOpensAt = stamp;
     if (meta?.countdownSent && meta.opensAt !== null) {
       const remain = Math.max(0, meta.opensAt - this.now());
       return this.delivery(actor, "ROUND_NOT_OPEN", COUNTDOWN_SAY, {
         opensAt: meta.opensAt,
         opensInMs: remain,
+        wait: true,
       });
     }
     return this.delivery(
       actor,
       "ROUND_NOT_OPEN",
       rejectionSay("ROUND_NOT_OPEN"),
+      { wait: true },
     );
   }
 

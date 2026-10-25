@@ -21,6 +21,7 @@ Deno.test("absorbPeer keeps the host room visible to a guest snapshot", () => {
       mode: "ONLINE",
       cpuCharacterId: null,
       pendingPractice: false,
+      echoedOpensAt: null,
       casting: false,
       wasInterrupted: false,
       pendingHit: null,
@@ -63,6 +64,7 @@ Deno.test("absorbPeer keeps the earlier disconnect deadline", () => {
     rematch: false,
     lastSeenAt: 0,
     lastSessionId: null,
+    echoedOpensAt: null,
   };
   const meta = {
     cpuPlayerId: null,
