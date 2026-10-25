@@ -1,9 +1,14 @@
 # 烈焰燎原
 
-两人用灵矽设备念咒对战。燎原是裁判：房间、吟唱、打断、血量和结算都在服务端。灵矽只负责听和说，通过对接本服务的云端
-MCP 进出每一拍。
+下面是当前仓库里能跑的 demo。新产品的范围、玩法、交互和架构见
+[产品设计](docs/设计文档.md)、[玩法设计](docs/gameplay-design.md)、[交互设计](docs/交互设计.md)、[架构设计](docs/架构设计.md)。搬迁前的目录在
+tag `old-demo`。
 
-没有网页大屏。两边听到的战报、咒语音效、对方原声和胜负，都从各自设备的喇叭出来。
+demo
+里，两人用灵矽设备念咒对战。燎原是裁判：房间、吟唱、打断、血量和结算都在服务端。灵矽只负责听和说，通过对接本服务的云端
+MCP
+进出每一拍。两边听到的战报、咒语音效、对方原声和胜负，都从各自设备的喇叭出来。浏览器对局在
+`web/`。
 
 ## 本地先跑通
 
@@ -25,16 +30,19 @@ npm install
 npm run dev
 ```
 
-页面默认位于 `http://localhost:3000`。未配置 Supabase 时使用单进程内存仓库；生产环境需配置
-`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`WEB_SESSION_SECRET` 和七牛语音环境变量。
+页面默认位于 `http://localhost:3000`。未配置 Supabase
+时使用单进程内存仓库；生产环境需配置
+`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`WEB_SESSION_SECRET`
+和七牛语音环境变量。
 
-服务默认听 `8787`。灵矽里填写的 SSE 地址是：
+`deno task dev` 听 `8787`，跑的是新引擎。灵矽的 SSE 地址要带连接密钥：
 
 ```text
-http://<公网主机>:8787/mcp
+http://<公网主机>:8787/mcp?key=<MCP_CONNECTION_KEY>
 ```
 
-本机没有公网地址时，用 Supabase 的函数地址。
+本机没有公网地址时用 Supabase 函数地址，配法见下面的部署一节。`deno task sim`
+仍走旧咒语 demo，不经过这把密钥。
 
 ## 一局怎么走
 
@@ -88,67 +96,97 @@ http://<公网主机>:8787/mcp
 - 关闭记忆、开场白和其他内置工具，只留这个 MCP。
 - 空闲超时拉到 300 秒。拾音用手动或自动都可以，先用手动把每句边界定清楚。
 
-MCP 的 SSE URL 填上面的 `/mcp`。平台会发 `GET /mcp`，再把 JSON-RPC 打到
-`/mcp/message`。工具结果从这条 SSE 上按请求 id 回去，所以 `ready` 和
-`wait_event` 可以先挂住，等对手动作后再返回。
+灵矽 MCP 建议这样填：
 
-身份只认请求头
-`X-Linx-Device-Id`，不让模型自己报设备号。两个设备可以绑同一个智能体。
+- 传输协议：Streamable HTTP（或 SSE，两者都支持）
+- MCP URL：`https://<project-ref>.supabase.co/functions/v1/game/mcp?key=<MCP_CONNECTION_KEY>`
+- Params 里的 `key`：同一把 `MCP_CONNECTION_KEY`（可与 URL 里的重复）
+- 若控制台还要求 Authorization / 出现 `authorization header required`：Header 填
+  `Authorization: Bearer <Supabase anon key>`。连接密钥继续放在 URL 的 `key`
+  上，不要把 anon key 和连接密钥弄混。
+- 不要填 `X-Linx-Device-Id`。
 
-初始提示词用大厅主持。开战和结束时，服务会用 `change_role`
-换成战场播报和复盘。提示词全文在 `src/game/logic.ts` 的 `LOBBY_PROMPT`。
+路径必须是 `/functions/v1/game/mcp`，不要截成 `/functions/v`，也不要用旧的
+`/functions/v1/mcp`。
+
+每台设备的提示词写死自己的 `device_id`。模型每次调用都原样传入。同机双人要先把
+`MCP_VOICEPRINT=1` 配上，提示词里说明认得出说话人时再传 `seat` 为 `A` 或 `B`。
+
+```text
+你是烈焰燎原的报幕。这台设备的 device_id 是 device-甲。每次工具调用都传这个 device_id。
+只使用 submit_lobby_text、submit_utterance、begin_cast、cancel_cast、ack_playback、wait_event。
+没有 create_room、join_room、ready、cast。
+
+玩家说选角、练习、对电脑、两个人、开房间、房间号、准备、再来一局、复盘：
+调用 submit_lobby_text，text 填玩家原话。大厅里不要调用 begin_cast。
+
+练习或战场里玩家念完整句：调用 submit_utterance，text 填原话。
+看血、还有哪些技能、投降也走 submit_utterance。
+
+只有已经在战场、玩家开始念咒时才调用 begin_cast。放弃这一句用 cancel_cast。
+
+content 里的原文逐字播出。文本为空就沉默。不要自己倒数，不要改写玩家的话。
+ack_required 为 true 时，念完调用 ack_playback，再按 wait 调用 wait_event。
+wait 为 true 时调用 wait_event，等待同一次调用返回。被取消或失败就立刻再调一次。
+```
+
+`initialize` 也会带同一段报幕约束。电脑技能有地址时，设备执行 `funcs` 里的
+`linx_play`。没有地址就不播放。首版不拉聊天记录，不播对方原声。
 
 ## 部署到 Supabase
 
-边缘函数单次响应大约 150
-秒会被网关掐断，长连接不能当整局的唯一通道。所以房间状态在 Postgres，SSE
-断了，模型按提示词再调一次 `wait_event`，漏掉的战报还在。
+边缘函数大约 150 秒会被网关掐断。对局快照和还没送到的主持句在 Postgres。SSE
+所在的实例 `LISTEN mcp`。另一实例写入后 `NOTIFY`。SSE
+断了，模型再调一次 `wait_event`，未送达的句子改绑到新的调用 id。
 
-这台开发机没有 Supabase
-登录态，云端项目还没推上去。代码和迁移已经按这个部署方式写好：
+`DATABASE_URL` 用数据库直连，端口 5432。6543 的事务池化收不到 `LISTEN`。
 
 ```bash
 supabase login
 export SUPABASE_PROJECT_REF=<project-ref>
-export LINX_API_KEY=<灵矽控制台的 key>
+export MCP_CONNECTION_KEY=<灵矽 MCP 配置里的连接密钥>
+export DATABASE_URL=<postgres 直连 URI>
+export MCP_VOICEPRINT=0
 sh scripts/deploy_supabase.sh
 ```
 
-脚本会推迁移、写入 `PUBLIC_BASE_URL` 和灵矽密钥，并关闭 JWT 校验。灵矽不会带
-Supabase 的用户令牌。部署完成后，SSE URL 是：
+脚本会推迁移，写入 `PUBLIC_BASE_URL`、`MCP_CONNECTION_KEY`、`MCP_VOICEPRINT` 和
+`DATABASE_URL`，并关闭 JWT 校验。部署完成后，灵矽 SSE URL 是：
 
 ```text
-https://<project-ref>.supabase.co/functions/v1/mcp
+https://<project-ref>.supabase.co/functions/v1/game/mcp?key=<MCP_CONNECTION_KEY>
 ```
 
 如果网关仍然要求 `apikey`，把项目的 anon key 填进灵矽 MCP 的 Header，不要填
-service role。
+service role。连接密钥走 URL 的 `key`，或者 `Authorization: Bearer`。
 
 ## 目录
 
-- `src/game/logic.ts`：咒语、命中、打断、结算
-- `src/battle/index.ts`：新对局内核的公开入口
-- `src/battle/controller.ts`：唯一规则控制层，负责校验和阶段推进
-- `src/battle/state.ts`：拥有全部运行状态的内部状态机，不承载规则判断
-- `src/battle/skills.ts`：角色、技能和效果配置
-- `src/battle/session.ts`：按 `battleId` 加载、串行执行并保存对局请求
-- `src/battle/repository.ts`：带版本号和 CAS 的对局仓库接口及内存实现
-- `src/battle/supabase_repository.ts`：跨进程共享的 Supabase/Postgres 仓库实现
-- `src/web/battle_application.ts`：Web 对局编排、权限校验、语音命令幂等和自动推进
-- `src/web/lobby/`：匹配、对局成员与语音命令仓库
-- `src/web/speech/`：七牛 ASR/TTS 适配接口
-- `web/`：Next.js Web BFF、游戏界面、录音与前端测试
-- `docs/web-architecture-design.md`：Next.js Web 接入层、游戏界面和七牛语音方案
-- `src/mcp/handler.ts`：MCP SSE 和工具调用
-- `src/mcp/store.ts`：单进程内存房，本地和 `sim` 用它
-- `src/mcp/supabase_store.ts`：同一套规则落到 Postgres
-- `scripts/sim_match.ts`：两个假设备走完一局
+```text
+src/game/                    咒语 demo，不属于新架构。语音接入还在调用，改完即删
+src/engine/                  对局内核。公开入口是 index.ts
+  rules/                     校验和阶段推进，以及内部状态
+  characters/                角色和技能
+  service/                   按 battleId 串行执行
+  store/                     快照仓库。内存实现和 Supabase
+  narration/                 战报句子
+  clock/                     到期判断。内核尚未调用
+  delivery/                  这条发给谁。内核尚未调用
+src/adapter/http/            Web 编排、大厅和语音命令
+src/adapter/mcp/             灵矽 MCP。SSE、工具和房间
+src/speech/                  七牛听写和合成
+supabase/functions/game/     唯一进程入口。/v1 与 /mcp 都挂在这里
+supabase/migrations/
+web/                         Next.js 页面、录音和前端测试
+docs/                        产品、玩法、交互、架构
+scripts/                     sim 和 sim:battle
+```
 
 ## 新对局内核
 
-`src/battle`
+`src/engine`
 只实现对局状态和规则，不处理客户端协议、提示文案或消息推送。请求处理代码应从
-`src/battle/index.ts` 使用 `BattleSessionService`，不要为每个请求自行创建
+`src/engine/index.ts` 使用 `BattleSessionService`，不要为每个请求自行创建
 `BattleController`，也不要直接调用 `state.ts` 的内部状态写方法。
 
 `BattleStateMachine`
@@ -159,7 +197,7 @@ service role。
 import {
   BattleSessionService,
   InMemoryBattleRepository,
-} from "./src/battle/index.ts";
+} from "./src/engine/index.ts";
 
 const repository = new InMemoryBattleRepository();
 const service = new BattleSessionService(repository);
