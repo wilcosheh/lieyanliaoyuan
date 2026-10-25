@@ -4,4 +4,5 @@
 .supabase/
 supabase/.temp/
 .deno/
+.vercel/
 *.log

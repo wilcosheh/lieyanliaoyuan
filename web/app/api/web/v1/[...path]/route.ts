@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { WEB_CHARACTERS } from "@core/web/characters.ts";
-import { WebApplicationError } from "@core/web/battle_application.ts";
-import { narrateEvent } from "@core/web/narration.ts";
+import { WEB_CHARACTERS } from "@core/adapter/http/characters.ts";
+import { WebApplicationError } from "@core/adapter/http/battle_application.ts";
+import { narrateEvent } from "@core/engine/narration/narration.ts";
 import { runtime as serverRuntime } from "@web/server/runtime";
 import {
   createSessionToken,

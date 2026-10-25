@@ -3,7 +3,7 @@ import type {
   VoiceActionResult,
   WebBattleView,
   WebCharacterView,
-} from "@core/web/dto.ts";
+} from "@core/adapter/http/dto.ts";
 
 export class ApiError extends Error {
   constructor(

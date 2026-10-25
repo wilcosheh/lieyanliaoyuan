@@ -19,13 +19,13 @@ import {
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BattleEvent } from "@core/battle/state.ts";
-import type { SkillEffect } from "@core/battle/skills.ts";
+import type { BattleEvent } from "@core/engine/rules/state.ts";
+import type { SkillEffect } from "@core/engine/characters/skills.ts";
 import type {
   WebBattleView,
   WebPlayerView,
   WebSkillView,
-} from "@core/web/dto.ts";
+} from "@core/adapter/http/dto.ts";
 import { webApi } from "@web/api/client";
 import { useBrowserSpeechRecognition } from "@web/audio/use-browser-speech-recognition";
 import { useVoiceRecorder } from "@web/audio/use-voice-recorder";
