@@ -80,6 +80,18 @@ Deno.test("versus cpu opens on one countdown sentence and resolves the first cas
   assertEquals(cast.caller?.phase, "BATTLE");
 });
 
+Deno.test("early ack repeats the countdown instead of an empty line", async () => {
+  const now = { value: 1_000 };
+  const game = engine(now);
+  await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
+  await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
+  await call(game, "d1", "c3", "submit_lobby_text", "准备");
+  const acked = await call(game, "d1", "c4", "ack_playback");
+  assertEquals(acked.caller?.say, "三。二。一。");
+  assertEquals(acked.caller?.wait, false);
+  assertEquals(acked.caller?.opens_in_ms, COUNTDOWN_MS);
+});
+
 Deno.test("practice reports perfection 100 and rejects a second skill in one line", async () => {
   const game = engine({ value: 0 });
   await call(game, "d1", "c1", "submit_lobby_text", "烈焰剑士");

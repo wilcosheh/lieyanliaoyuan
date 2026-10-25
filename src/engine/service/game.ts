@@ -874,7 +874,18 @@ export class GameEngine {
     if (meta && !meta.countdownSent && actor.phase === "BATTLE") {
       await this.openWindow(actor.battleId!, this.now());
     }
-    return this.delivery(actor, "ACCEPTED", "");
+    const current = actor.battleId ? this.metas.get(actor.battleId) : undefined;
+    if (
+      current?.countdownSent && current.opensAt !== null &&
+      this.now() < current.opensAt
+    ) {
+      return this.delivery(actor, "ACCEPTED", COUNTDOWN_SAY, {
+        opensAt: current.opensAt,
+        opensInMs: Math.max(0, current.opensAt - this.now()),
+        wait: false,
+      });
+    }
+    return this.delivery(actor, "ACCEPTED", "", { wait: false });
   }
 
   private async cast(
