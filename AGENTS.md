@@ -13,8 +13,12 @@
 
 ## 代码
 
-`README.md`、`src/game`、`src/battle`
-仍是旧对局。不要按当前产品文档去改这套实现，也不要把旧实现写回三份设计文档。
+`README.md` 里的跑法和 `src/game` 仍是旧咒语
+demo。不要按当前产品文档去改这套实现，也不要把旧实现写回三份设计文档。`src/game`
+不属于新目录，语音接入改为调用引擎之后删除。
+
+新目录是 `src/engine`、`src/adapter`、`src/speech`。搬迁前的快照是 tag
+`old-demo`。
 
 改完 Markdown 或 TypeScript 后跑 `deno fmt`。声称检查通过之前跑
 `deno task check`。
