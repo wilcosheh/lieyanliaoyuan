@@ -20,6 +20,7 @@ Deno.test("absorbPeer keeps the host room visible to a guest snapshot", () => {
       battleId: null,
       mode: "ONLINE",
       cpuCharacterId: null,
+      pendingPractice: false,
       casting: false,
       wasInterrupted: false,
       rematch: false,
