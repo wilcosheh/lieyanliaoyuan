@@ -5,7 +5,7 @@ import { encodeLinx } from "./linx.ts";
 const delivery: SayDelivery = {
   code: "ACCEPTED",
   event_id: "e1",
-  say: "破风斩命中。你1000血。对手935血。",
+  say: "疾风剑命中。你1000血。对手935血。",
   clips: [{ kind: "cpu_spell", url: "https://example.com/a.wav" }],
   stop_clips: true,
   ack_required: true,
@@ -17,7 +17,7 @@ Deno.test("linx encodes only clips that already have a url", () => {
   const encoded = encodeLinx(delivery);
   assertEquals(encoded.content, [{
     type: "text",
-    text: "破风斩命中。你1000血。对手935血。",
+    text: "疾风剑命中。你1000血。对手935血。",
   }]);
   assertEquals(encoded.funcs, [
     { name: "linx_stop", arguments: {} },

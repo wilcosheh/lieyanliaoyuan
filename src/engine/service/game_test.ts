@@ -65,16 +65,16 @@ Deno.test("versus cpu opens on one countdown sentence and resolves the first cas
   assertEquals(ready.caller?.ack_required, false);
   assertEquals(ready.caller?.opens_in_ms, COUNTDOWN_MS);
 
-  const early = await call(game, "d1", "c4", "submit_utterance", "破风斩");
+  const early = await call(game, "d1", "c4", "submit_utterance", "疾风剑");
   assertEquals(early.caller?.code, "ROUND_NOT_OPEN");
   assertEquals(early.caller?.say, "三。二。一。");
 
   now.value += COUNTDOWN_MS;
-  const cast = await call(game, "d1", "c5", "submit_utterance", "破风斩");
+  const cast = await call(game, "d1", "c5", "submit_utterance", "疾风剑");
   assertEquals(cast.caller?.code, "ACCEPTED");
   assertEquals(
     cast.caller?.say,
-    "破风斩命中。你1000血。对手935血。三。二。一。",
+    "疾风剑命中。你1000血。对手935血。三。二。一。",
   );
   assertEquals(cast.caller?.wait, true);
   assertEquals(cast.caller?.phase, "BATTLE");
@@ -90,7 +90,7 @@ Deno.test("practice during a battle leaves the battle and starts practice", asyn
 
   const practice = await call(game, "d1", "c4", "submit_lobby_text", "练习");
   assertEquals(practice.caller?.phase, "PRACTICE");
-  assertEquals(practice.caller?.say.includes("破风斩"), true);
+  assertEquals(practice.caller?.say.includes("疾风剑"), true);
 
   const list = await call(game, "d1", "c5", "submit_lobby_text", "选角");
   assertEquals(list.caller?.phase, "LOBBY");
@@ -133,16 +133,16 @@ Deno.test("practice reports perfection 100 and rejects a second skill in one lin
     "练技能",
   );
   assertEquals(practice.caller?.phase, "PRACTICE");
-  assertEquals(practice.caller?.say.includes("破风斩"), true);
+  assertEquals(practice.caller?.say.includes("疾风剑"), true);
   assertEquals(practice.caller?.say.includes("直接念技能名练习"), true);
 
-  const hit = await call(game, "d1", "c3", "submit_utterance", "破风斩");
-  assertEquals(hit.caller?.say, "完成度100。破风斩。造成65点伤害。");
+  const hit = await call(game, "d1", "c3", "submit_utterance", "疾风剑");
+  assertEquals(hit.caller?.say, "完成度100。疾风剑。造成65点伤害。");
   assertEquals(hit.caller?.wait, false);
 
-  const near = await call(game, "d1", "c3b", "submit_utterance", "破风站");
+  const near = await call(game, "d1", "c3b", "submit_utterance", "疾风见");
   assertEquals(near.caller?.code, "ACCEPTED");
-  assertEquals(near.caller?.say.includes("破风斩"), true);
+  assertEquals(near.caller?.say.includes("疾风剑"), true);
   assertEquals(near.caller?.say.includes("完成度100"), false);
   assertEquals(near.caller?.wait, false);
 
@@ -151,7 +151,7 @@ Deno.test("practice reports perfection 100 and rejects a second skill in one lin
     "d1",
     "c4",
     "submit_utterance",
-    "破风斩锐刃突刺",
+    "疾风剑锐刃突刺",
   );
   assertEquals(ambiguous.caller?.code, "AMBIGUOUS_SKILL");
   assertEquals(ambiguous.caller?.say, "一次一道。");
@@ -223,7 +223,7 @@ Deno.test("a late skill hears the cpu hit and further casts do not spin", async 
   await call(game, "d1", "c3", "submit_lobby_text", "准备");
   now.value = COUNTDOWN_MS + 3 * 400 + 2000;
   const late = await call(game, "d1", "c4", "submit_utterance", "沪震重机");
-  assertEquals(late.caller?.say.includes("中了破风斩。"), true);
+  assertEquals(late.caller?.say.includes("中了疾风剑。"), true);
   assertEquals(late.caller?.say.endsWith("三。二。一。"), true);
 
   const again = await call(game, "d1", "c5", "begin_cast");
@@ -240,7 +240,7 @@ Deno.test("repeating a cast before the window opens stays silent", async () => {
   await call(game, "d1", "c1", "submit_lobby_text", "对电脑");
   await call(game, "d1", "c2", "submit_lobby_text", "烈焰剑士");
   await call(game, "d1", "c3", "submit_lobby_text", "准备");
-  const early = await call(game, "d1", "c4", "submit_utterance", "破风斩");
+  const early = await call(game, "d1", "c4", "submit_utterance", "疾风剑");
   assertEquals(early.caller?.say, "三。二。一。");
   const loop = await call(game, "d1", "c5", "begin_cast");
   assertEquals(loop.caller?.say, "");
