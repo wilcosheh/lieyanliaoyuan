@@ -10,6 +10,7 @@ import {
 } from "../clock/clock.ts";
 import { audienceFor } from "../delivery/delivery.ts";
 import {
+  CHARACTER_LIST,
   COUNTDOWN_SAY,
   ENTRANCE,
   openingSay,
@@ -180,6 +181,50 @@ function wantsReady(text: string): boolean {
   return text === "准备" || text === "我准备好了" || text === "准备好了";
 }
 
+function wantsLeaveRoom(text: string): boolean {
+  return text === "退出" || text === "离开" || text === "退出房间" ||
+    text === "离开房间" || text === "解散" || text === "回大厅";
+}
+
+function wantsRoomNumber(text: string): boolean {
+  return text === "再说一次" || text.includes("房号") ||
+    text.includes("房间号") || text.includes("号码") ||
+    text.includes("哪个房间") || text.includes("什么房间") ||
+    text.includes("哪间");
+}
+
+/** 四位房间号，或「加入房间，房间号6993」「1、2、3、4」这种说法。 */
+export function extractJoinCode(text: string): string | null {
+  const normalized = text
+    .normalize("NFC")
+    .trim()
+    .replace(/[。．.！!？?\s]+$/g, "")
+    .replace(/[呀啊吧呢嘛哦哟]+$/g, "");
+  if (wantsOpenRoom(normalized)) return null;
+  const compact = normalized.replace(/(\d)[、,，.．\s]+(?=\d)/g, "$1");
+  if (/^\d{4}$/.test(compact)) return compact;
+  const match = compact.match(
+    /(?:加入房间|进入房间|进房间|加入|进入|房间号|房号)(?:是|为|：|:)?\s*(\d{4})$/,
+  );
+  if (match) return match[1] ?? null;
+  const loose = compact.match(
+    /(?:加入房间|进入房间|进房间|加入|进入).{0,12}?(?:房间号|房号|号码)?(?:是|为|：|:)?\s*(\d{4})$/,
+  );
+  return loose?.[1] ?? null;
+}
+
+function wantsCharacterList(text: string): boolean {
+  return text === "选角" || text === "选角色" || text === "有哪些角色" ||
+    text === "角色" || text.includes("什么角色") || text.includes("哪些角色");
+}
+
+/** 对局中再说这些，视为离开当前对局，回到大厅。 */
+function wantsLeaveBattle(text: string): boolean {
+  return wantsPractice(text) || wantsOpenRoom(text) || wantsVersusCpu(text) ||
+    wantsCharacterList(text) || text === "回大厅" || text === "退出" ||
+    extractCharacterName(text) !== null;
+}
+
 function parsePerfection(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isFinite(value) || value < 0 || value > 100) return value;
@@ -289,11 +334,34 @@ export class GameEngine {
       return this.finish(this.delivery(actor, "COMMAND_ALREADY_PROCESSED", ""));
     }
     if (!ALLOWED[actor.phase].includes(command.tool)) {
-      return this.remember(
-        idempotencyKey,
-        signature,
-        this.delivery(actor, "PHASE_REJECTED", ""),
-      );
+      const text = normalize(command.text);
+      if (
+        actor.phase === "BATTLE" && command.tool === "submit_lobby_text" &&
+        actor.mode !== "ONLINE" && wantsLeaveBattle(text)
+      ) {
+        actor.phase = "LOBBY";
+        actor.battleId = null;
+        actor.casting = false;
+        actor.mode = null;
+      } else if (
+        actor.phase === "BATTLE" && command.tool === "submit_lobby_text"
+      ) {
+        return this.remember(
+          idempotencyKey,
+          signature,
+          this.delivery(
+            actor,
+            "PHASE_REJECTED",
+            "这局还在进行。直接念技能名。要结束就说投降。",
+          ),
+        );
+      } else {
+        return this.remember(
+          idempotencyKey,
+          signature,
+          this.delivery(actor, "PHASE_REJECTED", ""),
+        );
+      }
     }
     if (actor.phase === "BATTLE") await this.refresh(actor);
     const caller = await this.dispatch(actor, device, command);
@@ -337,6 +405,14 @@ export class GameEngine {
     if (device.localDuo && command.seat && !device.enrolled[command.seat]) {
       return await this.enroll(actor, device);
     }
+    if (this.inOpenRoom(actor, device)) {
+      return await this.roomLobby(
+        actor,
+        device,
+        text,
+        command.terminal ?? "voice",
+      );
+    }
     if (text === "两个人" || text.includes("两个人")) {
       if (!device.voiceprint) return this.speak(actor, ENTRANCE);
       device.localDuo = true;
@@ -357,11 +433,12 @@ export class GameEngine {
       if (!device.roomCode) return this.speak(actor, ENTRANCE);
       return this.delivery(actor, "ACCEPTED", roomSay(device.roomCode));
     }
-    if (/^\d{4}$/.test(text)) {
+    const joinCode = extractJoinCode(text);
+    if (joinCode) {
       return await this.joinRoom(
         actor,
         device,
-        text,
+        joinCode,
         command.terminal ?? "voice",
       );
     }
@@ -374,6 +451,10 @@ export class GameEngine {
     if (text === "还有哪些技能" || text === "有哪些技能") {
       return await this.listSkills(actor);
     }
+    if (wantsCharacterList(text)) {
+      actor.phase = "LOBBY";
+      return this.speak(actor, ENTRANCE);
+    }
     const selectedName = extractCharacterName(text);
     if (selectedName) {
       const character = CHARACTERS.find((item) => item.name === selectedName);
@@ -382,8 +463,10 @@ export class GameEngine {
       }
     }
     if (/选|角色|剑士|守卫|武士|术士|法师|弓手|骑士/.test(text)) {
+      actor.phase = "LOBBY";
       return this.speak(actor, unknownCharacterSay());
     }
+    actor.phase = "LOBBY";
     return this.speak(actor, ENTRANCE);
   }
 
@@ -391,7 +474,7 @@ export class GameEngine {
     if (!actor.characterId) {
       return this.speak(
         actor,
-        rejectionSay("CHARACTER_REQUIRED"),
+        `先说角色名。可选${CHARACTER_LIST}。`,
         "CHARACTER_REQUIRED",
       );
     }
@@ -428,25 +511,25 @@ export class GameEngine {
   ): Promise<SayDelivery> {
     const room = this.rooms.get(code);
     if (!room || room.status === "STARTED" || room.guestKey) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "ROOM_NOT_FOUND",
         rejectionSay("ROOM_NOT_FOUND"),
+        "ROOM_NOT_FOUND",
       );
     }
     if (room.terminal !== terminal) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "ROOM_TERMINAL_MISMATCH",
         rejectionSay("ROOM_TERMINAL_MISMATCH"),
+        "ROOM_TERMINAL_MISMATCH",
       );
     }
     const host = this.actors.get(room.hostKey);
     if (!host) {
-      return this.delivery(
+      return this.speak(
         actor,
-        "ROOM_NOT_FOUND",
         rejectionSay("ROOM_NOT_FOUND"),
+        "ROOM_NOT_FOUND",
       );
     }
     room.guestKey = actor.key;
@@ -457,7 +540,101 @@ export class GameEngine {
       host,
       this.delivery(host, "ACCEPTED", "对手来了。请选角色并准备。"),
     );
-    return this.delivery(actor, "ACCEPTED", "已加入。请选角色并准备。");
+    return this.speak(actor, "已加入。请选角色并准备。");
+  }
+
+  private inOpenRoom(actor: Actor, device: Device): boolean {
+    if (actor.mode !== "ONLINE" || !device.roomCode) return false;
+    const room = this.rooms.get(device.roomCode);
+    if (!room || room.status === "STARTED") return false;
+    return room.hostKey === actor.key || room.guestKey === actor.key;
+  }
+
+  /** 房间还没开战时，只接受选角、准备、重听房号和退出。 */
+  private async roomLobby(
+    actor: Actor,
+    device: Device,
+    text: string,
+    terminal: TerminalKind,
+  ): Promise<SayDelivery> {
+    if (wantsLeaveRoom(text)) return this.leaveRoom(actor, device);
+    const joinCode = extractJoinCode(text);
+    if (joinCode && device.roomCode) {
+      if (joinCode !== device.roomCode) {
+        return this.speak(
+          actor,
+          `你在${roomSay(device.roomCode)}要换房先说退出。`,
+        );
+      }
+      const room = this.rooms.get(joinCode);
+      if (room?.hostKey === actor.key && !room.guestKey) {
+        return this.speak(
+          actor,
+          `${roomSay(joinCode)}你是房主。对手要换一台设备加入。`,
+        );
+      }
+      return this.speak(
+        actor,
+        "已经在房间里。请选角色并准备。要离开就说退出。",
+      );
+    }
+    if (wantsRoomNumber(text) && device.roomCode) {
+      return this.delivery(actor, "ACCEPTED", roomSay(device.roomCode));
+    }
+    if (wantsCharacterList(text)) {
+      return this.speak(
+        actor,
+        `可选${CHARACTER_LIST}。说角色名，然后说准备。`,
+      );
+    }
+    if (wantsOpenRoom(text)) {
+      const room = device.roomCode
+        ? this.rooms.get(device.roomCode)
+        : undefined;
+      if (room?.guestKey) {
+        return this.delivery(actor, "ACCEPTED", roomSay(room.code));
+      }
+      if (room) this.rooms.delete(room.code);
+      device.roomCode = null;
+      if (actor.mode === "ONLINE") actor.mode = null;
+      actor.battleId = null;
+      return this.openRoom(actor, device, terminal);
+    }
+    if (wantsReady(text)) return await this.ready(actor);
+    if (text === "还有哪些技能" || text === "有哪些技能") {
+      return await this.listSkills(actor);
+    }
+    const selectedName = extractCharacterName(text);
+    if (selectedName) {
+      const character = CHARACTERS.find((item) => item.name === selectedName);
+      if (character) {
+        return await this.selectCharacter(actor, character.id, character.name);
+      }
+    }
+    return this.speak(actor, "已经在房间里。请选角色并准备。要离开就说退出。");
+  }
+
+  private leaveRoom(actor: Actor, device: Device): SayDelivery {
+    const room = device.roomCode ? this.rooms.get(device.roomCode) : undefined;
+    const otherKey = room
+      ? (room.hostKey === actor.key ? room.guestKey : room.hostKey)
+      : null;
+    const other = this.opponent(actor) ??
+      (otherKey ? this.actors.get(otherKey) : undefined);
+    if (room) this.rooms.delete(room.code);
+    device.roomCode = null;
+    if (actor.mode === "ONLINE") actor.mode = null;
+    actor.battleId = null;
+    if (other && other.key !== actor.key) {
+      const otherDevice = this.devices.get(other.deviceId);
+      if (otherDevice && otherDevice.roomCode === room?.code) {
+        otherDevice.roomCode = null;
+      }
+      if (other.mode === "ONLINE") other.mode = null;
+      other.battleId = null;
+      this.side(other, this.speak(other, "对手离开了。"));
+    }
+    return this.speak(actor, "已离开房间。可以说练习，对电脑，或开房间。");
   }
 
   private async versusCpu(actor: Actor, text: string): Promise<SayDelivery> {
@@ -496,7 +673,10 @@ export class GameEngine {
     }
     const opponent = this.opponent(actor);
     if (opponent && actor.mode === "ONLINE") {
-      this.side(opponent, this.speak(opponent, `对手选了${name}。`));
+      this.side(
+        opponent,
+        this.delivery(opponent, "ACCEPTED", `对手选了${name}。`),
+      );
     }
     if (actor.mode === "LOCAL_DUO" && actor.seat) {
       const label = actor.seat === "A" ? "甲" : "乙";

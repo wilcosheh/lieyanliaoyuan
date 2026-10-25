@@ -14,8 +14,8 @@ const EMPTY: SayDelivery = {
   wait: false,
 };
 
-const REST_TIMEOUT_MS = 3000;
-const CALL_BUDGET_MS = 8000;
+const REST_TIMEOUT_MS = 8000;
+const CALL_BUDGET_MS = 20000;
 
 type Rest = {
   url: string;
@@ -49,8 +49,10 @@ export class RestHub {
     this.timers.delete(sessionId);
   }
 
-  tick(sessionId: string): void {
-    this.drain(sessionId).catch((error) => console.error("mcp drain", error));
+  tick(sessionId: string): Promise<void> {
+    return this.drain(sessionId).catch((error) => {
+      console.error("mcp drain", error);
+    });
   }
 
   async publish(sessionId: string, body: unknown): Promise<void> {
@@ -74,34 +76,40 @@ export class RestHub {
         () => this.withBudget(CALL_BUDGET_MS, () => this.runCall(input, key)),
       );
     } catch (error) {
-      console.error("mcp rest call", error);
-      // ack/wait 失败绝不能回可播报句子，否则灵矽会 ack→报错→再 ack 死循环。
-      const silent = input.command.tool === "ack_playback" ||
-        input.command.tool === "wait_event" ||
-        input.command.tool === "cancel_cast" ||
-        input.command.tool === "begin_cast";
-      const body = rpcResult(input.rpcId, {
-        ...EMPTY,
-        say: silent ? "" : "刚才没听清，请再说一次。",
-        wait: silent,
-      });
-      try {
-        await this.publish(input.sessionId, body);
-      } catch {
-        // ignore
-      }
-      return body;
+      return await this.fallback(input, error);
     }
+  }
+
+  private async fallback(input: HubCall, error: unknown): Promise<unknown> {
+    console.error("mcp rest call", error);
+    // ack/wait 失败绝不能回可播报句子，否则灵矽会 ack→报错→再 ack 死循环。
+    const silent = input.command.tool === "ack_playback" ||
+      input.command.tool === "wait_event" ||
+      input.command.tool === "cancel_cast" ||
+      input.command.tool === "begin_cast";
+    const body = rpcResult(input.rpcId, {
+      ...EMPTY,
+      say: silent ? "" : "刚才没听清，请再说一次。",
+      wait: silent,
+    });
+    try {
+      await this.publish(input.sessionId, body);
+    } catch {
+      // ignore
+    }
+    return body;
   }
 
   private async runCall(
     input: HubCall,
     key: string,
   ): Promise<unknown | null> {
-    if (input.command.tool === "submit_lobby_text") {
-      await this.clearPending(key);
-    }
-    const snapshot = await this.loadEngine(key);
+    const snapshot = input.command.tool === "submit_lobby_text"
+      ? (await Promise.all([
+        this.clearPending(key),
+        this.loadEngine(key),
+      ]))[1]
+      : await this.loadEngine(key);
     const engine = new GameEngine();
     engine.loadState(snapshot);
     const result = await engine.handle(input.command);

@@ -1,8 +1,8 @@
 import { CHARACTERS } from "../../engine/characters/skills.ts";
 import { GameEngine, type ToolName } from "../../engine/service/game.ts";
 import { MemoryHub } from "./hub.ts";
-import { PostgresHub } from "./postgres.ts";
 import { RestHub } from "./rest_hub.ts";
+import { SqlHub } from "./sql_hub.ts";
 import {
   INSTRUCTIONS,
   messageEndpoint,
@@ -16,7 +16,7 @@ type Session = {
   send: (event: string, data: string) => void;
 };
 
-type Hub = MemoryHub | PostgresHub | RestHub;
+type Hub = MemoryHub | RestHub | SqlHub;
 
 function createHub(
   options: {
@@ -30,15 +30,15 @@ function createHub(
 ): Hub {
   const supabaseUrl = options.supabaseUrl?.replace(/\/$/, "");
   const serviceRoleKey = options.serviceRoleKey;
+  if (options.databaseUrl) {
+    return new SqlHub(options.databaseUrl, owns, send);
+  }
   if (supabaseUrl && serviceRoleKey) {
     return new RestHub(
       { url: supabaseUrl, key: serviceRoleKey, request: fetch },
       owns,
       send,
     );
-  }
-  if (options.databaseUrl) {
-    return new PostgresHub(options.databaseUrl, owns, send);
   }
   return new MemoryHub(options.engine ?? new GameEngine(), send);
 }
@@ -47,7 +47,7 @@ const TOOLS: Array<{ name: ToolName; description: string }> = [
   {
     name: "submit_lobby_text",
     description:
-      "大厅或复盘里的原话。选角、练习、对电脑、人机对战、开房间、创建房间、房间号、准备、再来一局、复盘。device_id 用提示词里的设备号，不要填烈焰燎原或角色名。text 填玩家原话。",
+      "大厅或复盘里的原话。选角、练习、对电脑、人机对战、开房间、创建房间、房间号、准备、再来一局、复盘。device_id 用提示词里的设备号，不要填烈焰燎原或角色名。text 填玩家原话。创建房间返回后若 wait 为 true，念完立刻循环 wait_event，直到听到开战。",
   },
   {
     name: "submit_utterance",
@@ -68,7 +68,7 @@ const TOOLS: Array<{ name: ToolName; description: string }> = [
   {
     name: "wait_event",
     description:
-      "仅当上一条工具返回 wait 为 true 时调用。有下一条主持句时，用同一个调用从 SSE 返回。不要用它回答玩家刚说的话。",
+      "上一条 wait 为 true 时立刻调用，只传 device_id。没有新事件时返回「。」，不要念出来，立刻再调用本工具。开房后要一直重新调用，直到听到开战。返回的 content 原句念完；若仍是 wait true，再调用本工具。不要用它回答玩家刚说的话。",
   },
 ];
 
@@ -89,6 +89,8 @@ export function createMcpServer(options: {
   databaseUrl?: string;
   supabaseUrl?: string;
   serviceRoleKey?: string;
+  /** 没有新事件时，最久把这一次 wait_event 挂多久。必须短于灵矽掐断工具调用的时间。 */
+  waitHoldMs?: number;
 }): (req: Request) => Promise<Response> {
   const sessions = new Map<string, Session>();
   const send = (sessionId: string, body: unknown): boolean => {
@@ -135,6 +137,7 @@ export function createMcpServer(options: {
           sessions,
           hub,
           options.voiceprint === true,
+          options.waitHoldMs ?? 15_000,
         );
       } catch (error) {
         console.error("mcp streamable", error);
@@ -241,6 +244,7 @@ async function streamable(
   sessions: Map<string, Session>,
   hub: Hub,
   voiceprint: boolean,
+  waitHoldMs: number,
 ): Promise<Response> {
   const sessionId = req.headers.get("mcp-session-id")?.trim() ||
     crypto.randomUUID();
@@ -256,7 +260,6 @@ async function streamable(
         }
       },
     });
-    hub.watch(sessionId);
   } else {
     const previous = sessions.get(sessionId)!;
     sessions.set(sessionId, {
@@ -295,17 +298,34 @@ async function streamable(
       "wait_event";
   let body = handled.body ?? latest;
   if (body === null && isWait) {
-    const deadline = Date.now() + 120_000;
+    const deadline = Date.now() + waitHoldMs;
     while (body === null && Date.now() < deadline && !req.signal.aborted) {
-      if ("tick" in hub && typeof hub.tick === "function") hub.tick(sessionId);
+      await flush(hub, sessionId);
       await sleep(50);
       body = latest;
     }
   }
 
+  if (body === null && isWait && payload.id !== undefined) {
+    // 挂起结束仍无战报：解开订阅，把后来的事件留给下一次 wait_event。
+    // 绝不能回 202 text/plain，灵矽会拒掉并关掉整条连接。
+    await hub.cancel(sessionId, payload.id);
+    await flush(hub, sessionId);
+    body = latest ?? rpcResult(payload.id, {
+      code: "ACCEPTED",
+      event_id: "",
+      say: "。",
+      clips: [],
+      stop_clips: false,
+      ack_required: false,
+      phase: "LOBBY",
+      wait: true,
+    });
+  }
+
   if (body === null) {
     // 非 wait_event 若仍无 body，勿回 202 空壳——灵矽会显示空 result 并自行编词。
-    if (!isWait && payload.id !== undefined) {
+    if (payload.id !== undefined) {
       body = {
         jsonrpc: "2.0",
         id: payload.id,
@@ -370,7 +390,9 @@ async function acceptMessage(
   if (method === "notifications/cancelled") {
     const requestId = params.requestId ?? params.request_id;
     if (typeof requestId === "number" || typeof requestId === "string") {
-      await ctx.hub.cancel(sessionId, requestId);
+      ctx.hub.cancel(sessionId, requestId).catch((error) => {
+        console.error("mcp cancel", error);
+      });
     }
     return done();
   }
@@ -499,6 +521,13 @@ function sessionHeader(session?: string): Record<string, string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function flush(hub: Hub, sessionId: string): Promise<void> {
+  if ("tick" in hub && typeof hub.tick === "function") {
+    return Promise.resolve(hub.tick(sessionId)).then(() => undefined);
+  }
+  return Promise.resolve();
 }
 
 const databaseUrl = Deno.env.get("DATABASE_URL") ||
