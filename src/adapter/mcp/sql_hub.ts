@@ -3,11 +3,19 @@ import type { EngineSnapshot } from "../../engine/service/game.ts";
 import { extractJoinCode } from "../../engine/service/game.ts";
 import { deviceKey, type HubCall, type LocalSend } from "./hub.ts";
 import { type RpcId, rpcResult } from "./protocol.ts";
-import { absorbPeer, peerIsRelevant } from "./room_sync.ts";
+import { absorbPeer, peerIsRelevant, textNeedsRoomLock } from "./room_sync.ts";
+
+class NeedsPeers extends Error {
+  constructor() {
+    super("needs peers");
+    this.name = "NeedsPeers";
+  }
+}
 
 type Sql = {
   begin<T>(fn: (tx: Sql) => Promise<T>): Promise<T>;
   json(value: unknown): unknown;
+  end(options?: { timeout?: number }): Promise<void>;
   <T = Record<string, unknown>[]>(
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -83,9 +91,27 @@ export class SqlHub {
     input: HubCall,
     key: string,
   ): Promise<unknown | null> {
+    const text = input.command.text ?? "";
+    try {
+      return await this.transact(input, key, textNeedsRoomLock(text));
+    } catch (error) {
+      if (!isNeedsPeers(error)) throw error;
+      return await this.transact(input, key, true);
+    }
+  }
+
+  private async transact(
+    input: HubCall,
+    key: string,
+    cross: boolean,
+  ): Promise<unknown | null> {
     const sql = await this.query();
     return await sql.begin(async (tx) => {
-      await tx`select pg_advisory_xact_lock(hashtext('ly-rooms'))`;
+      await tx`select set_config('lock_timeout', '2000', true)`;
+      await tx`select set_config('statement_timeout', '8000', true)`;
+      if (cross) {
+        await tx`select pg_advisory_xact_lock(hashtext('ly-rooms'))`;
+      }
       await tx`select pg_advisory_xact_lock(hashtext(${key}))`;
       const [row] = await tx<{ state: EngineSnapshot }[]>`
         select state from ly_device_engine where device_key = ${key}
@@ -94,6 +120,9 @@ export class SqlHub {
       const joinCode = extractJoinCode(input.command.text ?? "");
       const loaded = new Map<string, EngineSnapshot | null>([[key, before]]);
       let merged = before;
+      if (!cross && this.needsPeers(key, before, joinCode)) {
+        throw new NeedsPeers();
+      }
       if (this.needsPeers(key, before, joinCode)) {
         const others = await tx<
           { device_key: string; state: EngineSnapshot }[]
@@ -304,14 +333,18 @@ export class SqlHub {
 
   private async withBudget<T>(ms: number, work: () => Promise<T>): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const task = work();
+    task.catch(() => {});
     try {
       return await Promise.race([
-        work(),
+        task,
         new Promise<T>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`mcp call budget ${ms}ms`)),
-            ms,
-          );
+          timer = setTimeout(() => {
+            const sql = this.sql;
+            this.sql = null;
+            sql?.end({ timeout: 1 }).catch(() => {});
+            reject(new Error(`mcp call budget ${ms}ms`));
+          }, ms);
         }),
       ]);
     } finally {
@@ -345,6 +378,17 @@ export class SqlHub {
     `;
     for (const row of rows) this.send(sessionId, row.body);
   }
+}
+
+function isNeedsPeers(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    if (current instanceof NeedsPeers || current.name === "NeedsPeers") {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
 }
 
 function restoreRpcId(value: string): RpcId {

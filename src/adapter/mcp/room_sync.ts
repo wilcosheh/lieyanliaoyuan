@@ -1,4 +1,7 @@
-import type { EngineSnapshot } from "../../engine/service/game.ts";
+import {
+  type EngineSnapshot,
+  extractJoinCode,
+} from "../../engine/service/game.ts";
 
 function emptySnapshot(): EngineSnapshot {
   return {
@@ -79,6 +82,15 @@ export function absorbPeer(
   }
   into.seq = Math.max(into.seq, peer.seq);
   return into;
+}
+
+/** 开房、加入才要先锁全部房间。练习、人机只动自己的设备。 */
+export function textNeedsRoomLock(text: string): boolean {
+  if (extractJoinCode(text)) return true;
+  return text.includes("开房间") || text.includes("创建房间") ||
+    text.includes("建房间") || text.includes("开个房") ||
+    text.includes("建个房") || /创建.+房间/.test(text) ||
+    /开.+房间/.test(text) || /建.+房间/.test(text);
 }
 
 export function peerIsRelevant(
