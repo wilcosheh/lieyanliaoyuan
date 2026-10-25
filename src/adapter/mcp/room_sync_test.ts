@@ -23,7 +23,10 @@ Deno.test("absorbPeer keeps the host room visible to a guest snapshot", () => {
       pendingPractice: false,
       casting: false,
       wasInterrupted: false,
+      pendingHit: null,
       rematch: false,
+      lastSeenAt: 0,
+      lastSessionId: null,
     }],
     rooms: [{
       code: "4787",
@@ -41,4 +44,64 @@ Deno.test("absorbPeer keeps the host room visible to a guest snapshot", () => {
   assertEquals(merged.rooms[0]?.code, "4787");
   assertEquals(merged.actors[0]?.characterId, "guardian");
   assertEquals(merged.devices[0]?.roomCode, "4787");
+});
+
+Deno.test("absorbPeer keeps the earlier disconnect deadline", () => {
+  const actor = {
+    key: "host",
+    deviceId: "host",
+    playerId: "p:host",
+    phase: "BATTLE" as const,
+    characterId: "swordsman",
+    battleId: "b1",
+    mode: "ONLINE" as const,
+    cpuCharacterId: null,
+    pendingPractice: false,
+    casting: false,
+    wasInterrupted: false,
+    pendingHit: null,
+    rematch: false,
+    lastSeenAt: 0,
+    lastSessionId: null,
+  };
+  const meta = {
+    cpuPlayerId: null,
+    cpuExtraMs: 0,
+    opensAt: null,
+    cpuCompleteAt: null,
+    countdownSent: true,
+    ackDeadline: null,
+    disconnectDeadline: null as number | null,
+    disconnectedPlayerId: null as string | null,
+  };
+  const base: EngineSnapshot = {
+    devices: [],
+    actors: [{
+      ...actor,
+      key: "guest",
+      deviceId: "guest",
+      playerId: "p:guest",
+    }],
+    rooms: [],
+    metas: [["b1", { ...meta }]],
+    seen: [],
+    seq: 1,
+    battles: [],
+  };
+  const peer: EngineSnapshot = {
+    devices: [],
+    actors: [actor],
+    rooms: [],
+    metas: [["b1", {
+      ...meta,
+      disconnectDeadline: 5_000,
+      disconnectedPlayerId: "p:host",
+    }]],
+    seen: [],
+    seq: 2,
+    battles: [],
+  };
+  const merged = absorbPeer(base, "host", peer);
+  assertEquals(merged.metas[0]?.[1].disconnectDeadline, 5_000);
+  assertEquals(merged.metas[0]?.[1].disconnectedPlayerId, "p:host");
 });

@@ -75,7 +75,20 @@ export function absorbPeer(
   for (const [battleId, meta] of peer.metas) {
     if (!battleIds.has(battleId)) continue;
     const index = into.metas.findIndex((item) => item[0] === battleId);
-    if (index < 0) into.metas.push([battleId, structuredClone(meta)]);
+    if (index < 0) {
+      into.metas.push([battleId, structuredClone(meta)]);
+      continue;
+    }
+    const current = into.metas[index]![1];
+    const peerDeadline = meta.disconnectDeadline ?? null;
+    const currentDeadline = current.disconnectDeadline ?? null;
+    if (
+      peerDeadline !== null &&
+      (currentDeadline === null || peerDeadline < currentDeadline)
+    ) {
+      current.disconnectDeadline = peerDeadline;
+      current.disconnectedPlayerId = meta.disconnectedPlayerId ?? null;
+    }
   }
   into.seq = Math.max(into.seq, peer.seq);
   return into;

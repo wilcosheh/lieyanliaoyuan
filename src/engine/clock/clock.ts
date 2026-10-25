@@ -13,6 +13,9 @@ export const COUNTDOWN_MS = 3000;
 /** 回执超时后仍进入倒数。 */
 export const ACK_MS = 5000;
 
+/** 连接空档超过这段时间仍未回来，对方胜。 */
+export const DISCONNECT_MS = 10_000;
+
 /** 每个汉字的电脑施法时间。终端附加时间在对局开始时写入。 */
 export const CPU_MS_PER_GRAPHEME = 400;
 

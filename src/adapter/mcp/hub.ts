@@ -24,6 +24,10 @@ export class MemoryHub {
     { sessionId: string; rpcId: RpcId }
   >();
   private readonly pending = new Map<string, SayDelivery[]>();
+  private readonly bound = new Map<
+    string,
+    { deviceId: string; seat?: "A" | "B" }
+  >();
 
   constructor(
     private readonly engine: GameEngine,
@@ -32,7 +36,12 @@ export class MemoryHub {
 
   watch(_sessionId: string): void {}
 
-  unwatch(_sessionId: string): void {}
+  unwatch(sessionId: string): void {
+    const bound = this.bound.get(sessionId);
+    this.bound.delete(sessionId);
+    if (!bound) return;
+    this.engine.markDisconnected(bound.deviceId, bound.seat);
+  }
 
   publish(sessionId: string, body: unknown): Promise<void> {
     this.send(sessionId, body);
@@ -52,6 +61,11 @@ export class MemoryHub {
   }
 
   async call(input: HubCall): Promise<unknown | null> {
+    input.command.sessionId = input.sessionId;
+    this.bound.set(input.sessionId, {
+      deviceId: input.command.deviceId,
+      seat: input.command.seat,
+    });
     const result = await this.engine.handle(input.command);
     if (result.caller) {
       const body = rpcResult(input.rpcId, result.caller);

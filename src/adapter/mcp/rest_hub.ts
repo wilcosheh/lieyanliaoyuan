@@ -1,5 +1,6 @@
 import { GameEngine, type SayDelivery } from "../../engine/service/game.ts";
 import type { EngineSnapshot } from "../../engine/service/game.ts";
+import { settleHubCall } from "./call_budget.ts";
 import { deviceKey, type HubCall, type LocalSend } from "./hub.ts";
 import { type RpcId, rpcResult } from "./protocol.ts";
 
@@ -27,6 +28,7 @@ type Rest = {
 export class RestHub {
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly chains = new Map<string, Promise<void>>();
+  private readonly bound = new Map<string, string>();
 
   constructor(
     private readonly rest: Rest,
@@ -47,6 +49,12 @@ export class RestHub {
     const timer = this.timers.get(sessionId);
     if (timer !== undefined) clearInterval(timer);
     this.timers.delete(sessionId);
+    const key = this.bound.get(sessionId);
+    this.bound.delete(sessionId);
+    if (!key) return;
+    this.persistDisconnect(key).catch((error) => {
+      console.error("mcp disconnect", error);
+    });
   }
 
   tick(sessionId: string): Promise<void> {
@@ -70,14 +78,54 @@ export class RestHub {
 
   async call(input: HubCall): Promise<unknown | null> {
     const key = deviceKey(input.command.deviceId, input.command.seat);
+    input.command.sessionId = input.sessionId;
+    this.bound.set(input.sessionId, key);
+    const work = this.serialize(key, () => this.runCall(input, key));
+    return await settleHubCall(
+      work,
+      CALL_BUDGET_MS,
+      (error) => this.recover(input, key, error),
+    );
+  }
+
+  private async recover(
+    input: HubCall,
+    key: string,
+    error: unknown,
+  ): Promise<unknown> {
     try {
-      return await this.serialize(
-        key,
-        () => this.withBudget(CALL_BUDGET_MS, () => this.runCall(input, key)),
-      );
-    } catch (error) {
-      return await this.fallback(input, error);
+      const snapshot = await this.loadEngine(key);
+      const engine = new GameEngine();
+      engine.loadState(snapshot);
+      const heard = engine.replay(input.command);
+      if (heard) {
+        const body = rpcResult(input.rpcId, heard);
+        try {
+          await this.publish(input.sessionId, body);
+        } catch {
+          // 原句已经能返回给这次调用。
+        }
+        return body;
+      }
+    } catch (recoverError) {
+      console.error("mcp rest recover", recoverError);
     }
+    return await this.fallback(input, error);
+  }
+
+  private async persistDisconnect(key: string): Promise<void> {
+    const snapshot = await this.loadEngine(key);
+    if (!snapshot) return;
+    const engine = new GameEngine();
+    engine.loadState(snapshot);
+    const seat = key.endsWith(":A")
+      ? "A"
+      : key.endsWith(":B")
+      ? "B"
+      : undefined;
+    const deviceId = seat ? key.slice(0, -2) : key;
+    engine.markDisconnected(deviceId, seat);
+    await this.saveEngine(key, engine.exportState());
   }
 
   private async fallback(input: HubCall, error: unknown): Promise<unknown> {
@@ -144,26 +192,6 @@ export class RestHub {
     const run = prev.then(work, work);
     this.chains.set(key, run.then(() => {}, () => {}));
     return run;
-  }
-
-  private async withBudget<T>(
-    ms: number,
-    work: () => Promise<T>,
-  ): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        work(),
-        new Promise<T>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`mcp call budget ${ms}ms`)),
-            ms,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
   }
 
   private async clearPending(key: string): Promise<void> {
