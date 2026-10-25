@@ -189,3 +189,68 @@ Deno.test("product name is rejected as device_id", async () => {
   assertEquals(message.includes("对手是"), false);
   await reader.cancel();
 });
+
+function toolCall(
+  id: number,
+  name: string,
+  args: Record<string, string>,
+): Request {
+  return new Request("http://localhost/mcp", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer secret",
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name, arguments: args },
+    }),
+  });
+}
+
+Deno.test("an idle wait_event returns json instead of text/plain", async () => {
+  const handle = createMcpServer({
+    engine: new GameEngine(),
+    connectionKey: "secret",
+    waitHoldMs: 40,
+  });
+  const res = await handle(toolCall(1, "wait_event", { device_id: "小贾" }));
+  assertEquals(res.status, 200);
+  assertEquals(
+    res.headers.get("content-type"),
+    "application/json; charset=utf-8",
+  );
+  const body = await res.json();
+  assertEquals(body.result.content[0].text, "。");
+  assertEquals(body.result.structuredContent.wait, true);
+});
+
+Deno.test("the next wait_event still hears an opponent who arrived after the heartbeat", async () => {
+  const handle = createMcpServer({
+    engine: new GameEngine({ random: () => 0.1234 }),
+    connectionKey: "secret",
+    waitHoldMs: 40,
+  });
+  await handle(toolCall(1, "submit_lobby_text", {
+    device_id: "host",
+    text: "开房间",
+  }));
+  const idle = await handle(toolCall(2, "wait_event", { device_id: "host" }));
+  assertEquals((await idle.json()).result.content[0].text, "。");
+  const guest = await handle(toolCall(3, "submit_lobby_text", {
+    device_id: "guest",
+    text: "1234",
+  }));
+  assertEquals(
+    (await guest.json()).result.content[0].text,
+    "已加入。请选角色并准备。",
+  );
+  const again = await handle(toolCall(4, "wait_event", { device_id: "host" }));
+  assertEquals(
+    (await again.json()).result.content[0].text,
+    "对手来了。请选角色并准备。",
+  );
+});
