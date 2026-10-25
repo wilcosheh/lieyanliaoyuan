@@ -1,4 +1,4 @@
 project_id = "lieyanliaoyuan"
 
-[functions.mcp]
+[functions.game]
 verify_jwt = false

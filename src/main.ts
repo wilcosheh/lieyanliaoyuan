@@ -1,7 +1,6 @@
-import { createDefaultCtx, handle } from "./adapter/mcp/handler.ts";
+import { handle } from "./adapter/mcp/server.ts";
 
-const ctx = createDefaultCtx();
 const port = Number(Deno.env.get("PORT") ?? "8787");
 
-Deno.serve({ port, hostname: "0.0.0.0" }, (req) => handle(req, ctx));
+Deno.serve({ port, hostname: "0.0.0.0" }, handle);
 console.log(`lieyanliaoyuan listening on :${port}/mcp`);

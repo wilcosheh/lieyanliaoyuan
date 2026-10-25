@@ -3,7 +3,8 @@
   "specifiers": {
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14",
-    "npm:pinyin-pro@3.26.0": "3.26.0"
+    "npm:pinyin-pro@3.26.0": "3.26.0",
+    "npm:postgres@3.4.7": "3.4.7"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -19,12 +20,16 @@
   "npm": {
     "pinyin-pro@3.26.0": {
       "integrity": "sha512-HcBZZb0pvm0/JkPhZHWA5Hqp2cWHXrrW/WrV+OtaYYM+kf35ffvZppIUuGmyuQ7gDr1JDJKMkbEE+GN0wfMoGg=="
+    },
+    "postgres@3.4.7": {
+      "integrity": "sha512-Jtc2612XINuBjIl/QTWsV5UvE8UHuNblcO3vVADSrKsrc6RqGX6lOW1cEo3CM2v0XG4Nat8nI+YM7/f26VxXLw=="
     }
   },
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",
-      "npm:pinyin-pro@3.26.0"
+      "npm:pinyin-pro@3.26.0",
+      "npm:postgres@3.4.7"
     ]
   }
 }
