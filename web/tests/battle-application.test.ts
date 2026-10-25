@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BattleSessionService } from "../../src/battle/session.ts";
-import { InMemoryBattleRepository } from "../../src/battle/repository.ts";
-import { WebBattleApplication } from "../../src/web/battle_application.ts";
-import { InMemoryWebLobbyRepository } from "../../src/web/lobby/repository.ts";
+import { WebBattleApplication } from "../../src/adapter/http/battle_application.ts";
+import { InMemoryWebLobbyRepository } from "../../src/adapter/http/lobby/repository.ts";
+import { BattleSessionService } from "../../src/engine/service/session.ts";
+import { InMemoryBattleRepository } from "../../src/engine/store/repository.ts";
 import type {
   SpeechProvider,
   SpeechRecognitionResult,
-} from "../../src/web/speech/provider.ts";
+} from "../../src/speech/provider.ts";
 
 class QueueSpeechProvider implements SpeechProvider {
   calls = 0;

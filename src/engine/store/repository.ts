@@ -1,5 +1,5 @@
-import type { ControllerOptions } from "./controller.ts";
-import type { BattleState } from "./state.ts";
+import type { ControllerOptions } from "../rules/controller.ts";
+import type { BattleState } from "../rules/state.ts";
 
 export type BattleRecord = {
   battleId: string;
@@ -72,6 +72,17 @@ export class InMemoryBattleRepository implements BattleRepository {
   load(battleId: string): Promise<BattleRecord | null> {
     const record = this.records.get(battleId);
     return Promise.resolve(record ? structuredClone(record) : null);
+  }
+
+  dump(): BattleRecord[] {
+    return [...this.records.values()].map((record) => structuredClone(record));
+  }
+
+  restore(records: BattleRecord[]): void {
+    this.records.clear();
+    for (const record of records) {
+      this.records.set(record.battleId, structuredClone(record));
+    }
   }
 
   save(

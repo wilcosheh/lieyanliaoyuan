@@ -12,7 +12,7 @@ import {
   soloToolLine,
   speak,
   toolResult,
-} from "../game/logic.ts";
+} from "../../game/logic.ts";
 import type { ChantLookup } from "./audio.ts";
 import type { CallInput, Delivery, Store } from "./store.ts";
 

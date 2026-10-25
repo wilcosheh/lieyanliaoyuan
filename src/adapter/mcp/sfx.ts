@@ -1,4 +1,4 @@
-import { SFX_NAMES, type SfxName } from "../game/logic.ts";
+import { SFX_NAMES, type SfxName } from "../../game/logic.ts";
 
 const RATE = 16_000;
 

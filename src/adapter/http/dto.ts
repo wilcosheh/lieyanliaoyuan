@@ -3,8 +3,11 @@ import type {
   BattleStatus,
   RoundStatus,
   StatusEffectState,
-} from "../battle/state.ts";
-import type { PhraseLengthTier, SkillEffect } from "../battle/skills.ts";
+} from "../../engine/rules/state.ts";
+import type {
+  PhraseLengthTier,
+  SkillEffect,
+} from "../../engine/characters/skills.ts";
 
 export type WebPlayerView = {
   playerId: string;

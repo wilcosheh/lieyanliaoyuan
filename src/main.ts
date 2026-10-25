@@ -1,4 +1,4 @@
-import { createDefaultCtx, handle } from "./mcp/handler.ts";
+import { createDefaultCtx, handle } from "./adapter/mcp/handler.ts";
 
 const ctx = createDefaultCtx();
 const port = Number(Deno.env.get("PORT") ?? "8787");

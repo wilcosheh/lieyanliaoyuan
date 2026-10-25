@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BattleController } from "../../src/battle/controller.ts";
-import { toWebBattleView } from "../../src/web/battle_view.ts";
+import { toWebBattleView } from "../../src/adapter/http/battle_view.ts";
+import { BattleController } from "../../src/engine/rules/controller.ts";
 
 function startedController() {
   const controller = new BattleController("battle", ["a", "b"]);

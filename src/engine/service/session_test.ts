@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
-import { InMemoryBattleRepository } from "./repository.ts";
+import { InMemoryBattleRepository } from "../store/repository.ts";
 import { type BattleSessionResponse, BattleSessionService } from "./session.ts";
 
 function expectOk<T>(

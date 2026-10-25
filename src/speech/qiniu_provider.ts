@@ -32,7 +32,9 @@ function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 32_768;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
   }
   return btoa(binary);
 }
@@ -129,7 +131,9 @@ export class QiniuSpeechProvider implements SpeechProvider {
       throw new Error("QINIU_TTS_NOT_CONFIGURED");
     }
     const tts = this.options.tts;
-    const url = `${tts.baseUrl.replace(/\/$/, "")}${tts.path ?? "/audio/speech"}`;
+    const url = `${tts.baseUrl.replace(/\/$/, "")}${
+      tts.path ?? "/audio/speech"
+    }`;
     const response = await this.fetchWithTimeout(url, {
       method: "POST",
       headers: {

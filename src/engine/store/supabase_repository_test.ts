@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { BattleController } from "./controller.ts";
+import { BattleController } from "../rules/controller.ts";
 import {
   BattleNotFoundError,
   BattleVersionConflictError,

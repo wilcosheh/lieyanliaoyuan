@@ -5,7 +5,7 @@ import {
   type ControllerOptions,
   type RuleErrorCode,
 } from "./controller.ts";
-import { CHARACTERS } from "./skills.ts";
+import { CHARACTERS } from "../characters/skills.ts";
 
 function expectOk(response: BattleResponse): void {
   assert(response.ok, response.ok ? undefined : response.error.code);

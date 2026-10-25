@@ -5,7 +5,7 @@ export {
   type ControllerOptions,
   type RuleErrorCode,
   type SubmitActionInput,
-} from "./controller.ts";
+} from "./rules/controller.ts";
 export {
   BattleAlreadyExistsError,
   BattleNotFoundError,
@@ -14,15 +14,15 @@ export {
   BattleVersionConflictError,
   InMemoryBattleRepository,
   type NewBattleRecord,
-} from "./repository.ts";
-export { SupabaseBattleRepository } from "./supabase_repository.ts";
+} from "./store/repository.ts";
+export { SupabaseBattleRepository } from "./store/supabase_repository.ts";
 export {
   type BattleSessionResponse,
   BattleSessionService,
   type MutationGuard,
   type SessionError,
   type SessionErrorCode,
-} from "./session.ts";
+} from "./service/session.ts";
 export {
   type CharacterConfig,
   CHARACTERS,
@@ -32,7 +32,7 @@ export {
   type SkillEffect,
   type SkillSlot,
   validateCharacterConfig,
-} from "./skills.ts";
+} from "./characters/skills.ts";
 export type {
   ActionState,
   BattleEvent,
@@ -43,4 +43,4 @@ export type {
   RoundState,
   RoundStatus,
   StatusEffectState,
-} from "./state.ts";
+} from "./rules/state.ts";

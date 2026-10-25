@@ -1,12 +1,12 @@
 import "server-only";
-import { BattleSessionService } from "../../../src/battle/session.ts";
-import { InMemoryBattleRepository } from "../../../src/battle/repository.ts";
-import { SupabaseBattleRepository } from "../../../src/battle/supabase_repository.ts";
-import { WebBattleApplication } from "../../../src/web/battle_application.ts";
-import { InMemoryWebLobbyRepository } from "../../../src/web/lobby/repository.ts";
-import { SupabaseWebLobbyRepository } from "../../../src/web/lobby/supabase_repository.ts";
-import { QiniuSpeechProvider } from "../../../src/web/speech/qiniu_provider.ts";
-import type { SpeechProvider } from "../../../src/web/speech/provider.ts";
+import { WebBattleApplication } from "../../../src/adapter/http/battle_application.ts";
+import { InMemoryWebLobbyRepository } from "../../../src/adapter/http/lobby/repository.ts";
+import { SupabaseWebLobbyRepository } from "../../../src/adapter/http/lobby/supabase_repository.ts";
+import { BattleSessionService } from "../../../src/engine/service/session.ts";
+import { InMemoryBattleRepository } from "../../../src/engine/store/repository.ts";
+import { SupabaseBattleRepository } from "../../../src/engine/store/supabase_repository.ts";
+import { QiniuSpeechProvider } from "../../../src/speech/qiniu_provider.ts";
+import type { SpeechProvider } from "../../../src/speech/provider.ts";
 
 class UnconfiguredSpeechProvider implements SpeechProvider {
   recognize(): Promise<never> {
